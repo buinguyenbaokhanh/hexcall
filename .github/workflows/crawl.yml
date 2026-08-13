@@ -13,8 +13,12 @@
 name: crawl-and-publish
 
 on:
-  schedule:
-    - cron: "0 */6 * * *"   # every 6 hours
+  # The schedule is deliberately OFF. It needs a production key: development
+  # keys expire every 24 hours, so a scheduled crawl fails from day two and
+  # every run after that is noise. Re-enable this line once you are approved.
+  #
+  # schedule:
+  #   - cron: "0 */6 * * *"   # every 6 hours
   workflow_dispatch:         # lets you trigger it manually from the Actions tab
 
 permissions:

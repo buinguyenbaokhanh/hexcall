@@ -75,6 +75,39 @@ class _Acc:
         return self.sum / self.n if self.n else 0.0
 
 
+def _trait_rows(trait_acc: dict, total: int) -> list[dict]:
+    """Per-trait breakpoint distribution: [{name, total_pct, levels:[...]}].
+
+    A comp doesn't hit one fixed breakpoint -- the same board runs 2 of a trait
+    on some games and 4 on others, and those place differently. Reporting only
+    the most common count throws away the part a player can act on ("going from
+    3 to 4 is worth a full placement").
+    """
+    by_name: dict[str, list[dict]] = defaultdict(list)
+    seen: dict[str, int] = defaultdict(int)
+    for (name, units), acc in trait_acc.items():
+        if acc.n < MIN_BUILD_N:
+            continue
+        by_name[name].append({"units": units, "n": acc.n,
+                              "pct": round(acc.n / total, 4),
+                              "avg": round(acc.avg, 2)})
+        seen[name] += acc.n
+
+    rows = []
+    for name, levels in by_name.items():
+        levels.sort(key=lambda r: r["units"])
+        modal = max(levels, key=lambda r: r["n"])
+        rows.append({
+            "name": name,
+            "units": modal["units"],          # kept for the compact row view
+            "pct": round(seen[name] / total, 3),
+            "avg": modal["avg"],
+            "levels": levels,
+        })
+    rows.sort(key=lambda r: -r["pct"])
+    return rows[:TOP_TRAITS]
+
+
 def _detail_from(boards: list[dict]) -> dict:
     """boards = [{placement, level, units, traits}] for one comp (optionally
     filtered to those holding a given augment)."""
@@ -87,13 +120,17 @@ def _detail_from(boards: list[dict]) -> dict:
     build_acc: dict[str, dict[tuple, _Acc]] = defaultdict(lambda: defaultdict(_Acc))
     itemcount_acc: dict[int, _Acc] = defaultdict(_Acc)
     level_acc: dict[int, _Acc] = defaultdict(_Acc)
-    trait_units: dict[str, Counter] = defaultdict(Counter)
+    trait_acc: dict[tuple[str, int], _Acc] = defaultdict(_Acc)
     carry_counter: Counter = Counter()
     item_acc: dict[str, _Acc] = defaultdict(_Acc)
+    item_holder_acc: dict[tuple[str, str], _Acc] = defaultdict(_Acc)
+    unit_itemcount_acc: dict[tuple[str, int], _Acc] = defaultdict(_Acc)
+    placements: Counter = Counter()
 
     for b in boards:
         p = b["placement"]
         level_acc[b.get("level", 0)].add(p)
+        placements[p] += 1
 
         seen_units = set()
         for u in b.get("units", []):
@@ -108,6 +145,10 @@ def _detail_from(boards: list[dict]) -> dict:
             items = tuple(sorted(u.get("itemNames") or []))
             for it in items:
                 item_acc[it].add(p)
+                item_holder_acc[(it, cid)].add(p)
+            # Item count per unit, not just the carry: a support holding 2
+            # items instead of 0 is a real decision the carry curve can't show.
+            unit_itemcount_acc[(cid, min(len(items), 3))].add(p)
             if len(items) >= 2:
                 build_acc[cid][items].add(p)
 
@@ -121,7 +162,7 @@ def _detail_from(boards: list[dict]) -> dict:
 
         for t in b.get("traits", []):
             if t.get("tier_current", 0) > 0:
-                trait_units[t["name"]][t.get("num_units", 0)] += 1
+                trait_acc[(t["name"], t.get("num_units", 0))].add(p)
 
     units = []
     for cid, acc in unit_acc.items():
@@ -143,6 +184,11 @@ def _detail_from(boards: list[dict]) -> dict:
                  for k, a in build_acc[cid].items() if a.n >= MIN_BUILD_N],
                 key=lambda r: r["avg"],
             )[:TOP_BUILDS_PER_UNIT],
+            "item_counts": [
+                {"items": n_items, "pct": round(a.n / acc.n, 4), "avg": round(a.avg, 2)}
+                for (c2, n_items), a in sorted(unit_itemcount_acc.items(), key=lambda kv: kv[0][1])
+                if c2 == cid and a.n >= 10
+            ],
         })
     units.sort(key=lambda u: -u["play_rate"])
 
@@ -165,17 +211,27 @@ def _detail_from(boards: list[dict]) -> dict:
         # The comp's full synergy list, not just its headline traits: a board
         # running 4 of one trait also quietly runs several 2-breakpoints, and
         # those are part of what the player is actually building toward.
-        "traits": [
-            {"name": name, "units": cnt.most_common(1)[0][0],
-             "pct": round(cnt.most_common(1)[0][1] / total, 3)}
-            for name, cnt in sorted(trait_units.items(),
-                                    key=lambda kv: -sum(kv[1].values()))[:TOP_TRAITS]
-        ],
+        "traits": _trait_rows(trait_acc, total),
         "top_items": sorted(
-            [{"id": k, "n": a.n, "avg": round(a.avg, 2)}
+            [{"id": k, "n": a.n, "avg": round(a.avg, 2),
+              "pct": round(a.n / total, 4),
+              "holders": sorted(
+                  [{"id": c2, "n": h.n, "avg": round(h.avg, 2),
+                    "share": round(h.n / a.n, 4)}
+                   for (i2, c2), h in item_holder_acc.items()
+                   if i2 == k and h.n >= MIN_BUILD_N],
+                  key=lambda r: r["avg"])[:6]}
              for k, a in item_acc.items() if a.n >= MIN_UNIT_N],
             key=lambda r: -r["n"],
-        )[:12],
+        )[:20],
+        # Full placement histogram. An average hides shape: two comps both
+        # averaging 4.2 play very differently if one is bimodal (wins or
+        # bottom-fours) and the other clusters at 4th.
+        "placements": [
+            {"place": i, "pct": round(placements.get(i, 0) / total, 4),
+             "n": placements.get(i, 0)}
+            for i in range(1, 9)
+        ],
     }
 
 
@@ -224,6 +280,11 @@ def build_comp_details(conn, published_comps: dict, resolver=None, **filters) ->
         for it in d.get("top_items", []):
             it["name"] = name_item(it["id"])
             it["icon"] = icon_item(it["id"])
+            for h in it.get("holders", []):
+                h["name"] = name_unit(h["id"])
+                h["icon"] = icon_unit(h["id"])
+        for t in d.get("traits", []):
+            t["display"] = resolver.trait(t["name"]) if resolver else t["name"]
         return d
 
     out = {}

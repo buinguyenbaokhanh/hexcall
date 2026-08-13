@@ -63,6 +63,10 @@ SLICES = [
 
 MIN_SAMPLE_TO_PUBLISH = 4000  # participants; below this the slice is noise
 
+# Units summarised onto each comp row in the slice payload. A TFT board caps at
+# 10ish, and the row only needs enough to be recognisable.
+BOARD_UNITS = 10
+
 
 # game_version is free-form and its shape differs by platform. Live matches
 # report the full build banner:
@@ -122,6 +126,42 @@ def auto_comp_name(shape: dict, resolver) -> str | None:
     trait_name = resolver.trait(trait_id)
     carry_name = resolver.champion(carry) if carry else ""
     return " ".join(x for x in (str(units), trait_name, carry_name) if x).strip()
+
+
+# A unit is treated as a reroll target when it hits 3-star on at least this
+# share of the comp's boards. Well below half on purpose: a comp only manages
+# the 3-star some of the time, but rerolling for it is still the plan.
+REROLL_STAR_SHARE = 0.30
+
+
+def comp_profile(base: dict) -> dict:
+    """The measured characteristics an augment can be matched against.
+
+    Everything here comes from the aggregation, not from judgement: the level
+    the comp actually finishes on, the units it actually 3-stars, how many
+    items its carry actually ends up holding. The client pairs these with what
+    an augment says it does, which is the only honest way to answer "does this
+    augment fit this comp" when the match API records no augments at all.
+    """
+    levels = base.get("level_curve") or []
+    modal_level = max(levels, key=lambda r: r["pct"])["level"] if levels else None
+
+    three_stars = [u.get("name") or u["id"] for u in base.get("units", [])
+                   if float((u.get("stars") or {}).get("3", {}).get("pct") or 0) >= REROLL_STAR_SHARE]
+
+    counts = base.get("item_count_curve") or []
+    carry_items = max(counts, key=lambda r: r["n"])["items"] if counts else None
+
+    carry = (base.get("carries") or [{}])[0]
+    return {
+        "finish_level": modal_level,
+        "reroll": bool(three_stars),
+        "three_stars": three_stars,
+        "carry_items": carry_items,
+        "carry": carry.get("id"),
+        "trait_ids": [t["name"] for t in base.get("traits", [])],
+        "champion_ids": [u["id"] for u in base.get("units", [])],
+    }
 
 
 def name_comps(shapes: dict, overrides: dict | None, resolver) -> dict:
@@ -285,6 +325,33 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
             for cslug, doc in details.items():
                 _write(ddir / f"{cslug}.json", doc)
             stats["comp_slugs"] = {sig: slug(sig) for sig in stats["comps"]}
+
+            # Lift a compact board summary into the slice payload so the comp
+            # LIST can show its units and traits without fetching one detail
+            # file per row. The full detail stays on demand; this is only what
+            # a row needs to be recognisable at a glance.
+            for sig in stats["comps"]:
+                doc = details.get(slug(sig))
+                if not doc:
+                    continue
+                base = doc.get("base", {})
+                carry_id = (base.get("carries") or [{}])[0].get("id")
+                stats["comps"][sig]["board"] = [
+                    {"id": u["id"], "name": u.get("name"), "icon": u.get("icon"),
+                     "play_rate": u.get("play_rate"),
+                     "carry": u["id"] == carry_id,
+                     # Most common star level reached, so a row can show 2* vs
+                     # 3* the way the game does -- it's the difference between
+                     # a reroll board and a standard one.
+                     "star": max(u.get("stars", {}).items(),
+                                 key=lambda kv: kv[1]["pct"], default=("2", None))[0],
+                     "items": (u.get("builds") or [{}])[0].get("items", [])[:3],
+                     "item_icons": (u.get("builds") or [{}])[0].get("icons", [])[:3]}
+                    for u in base.get("units", [])[:BOARD_UNITS]
+                ]
+                stats["comps"][sig]["traits"] = base.get("traits", [])[:6]
+                stats["comps"][sig]["levels"] = base.get("level_curve", [])
+                stats["comps"][sig]["profile"] = comp_profile(base)
             log.info("  %d comp detail docs for %s", len(details), sd["id"])
 
         meta = _write(out / f"{sd['id']}.json", stats)

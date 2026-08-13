@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Search, Info } from "lucide-react";
-import { AugmentIcon } from "./icons.jsx";
+import { AugmentIcon, ChampionIcon } from "./icons.jsx";
+import { TraitBadge } from "./TraitBadge.jsx";
 import { HoverCard } from "./HoverCard.jsx";
 
 // TFT's own augment rarities. The colours are the game's, so the frame around
@@ -73,7 +74,7 @@ function AugmentCard({ a }) {
  * invented. What IS available is the full pool with rarity and effect text,
  * which is genuinely useful as a lookup, so that is what this is.
  */
-export default function Augments({ augmentMeta }) {
+export default function Augments({ augmentMeta, championMeta, traitMeta }) {
   const [rarityFilter, setRarityFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState("rarity");
@@ -81,6 +82,7 @@ export default function Augments({ augmentMeta }) {
   const rows = useMemo(() => Object.entries(augmentMeta || {}).map(([id, m]) => ({
     id, name: m.name || id, icon: m.icon, rarity: m.rarity,
     description: m.description, traits: m.traits || [],
+    refs: m.refs, variants: m.variants,
   })), [augmentMeta]);
 
   const counts = useMemo(() => {
@@ -98,6 +100,9 @@ export default function Augments({ augmentMeta }) {
     }
     return [...out].sort(SORTS[sortBy].fn);
   }, [rows, rarityFilter, query, sortBy]);
+
+  const linked = useMemo(() => rows.filter(
+    (r) => r.variants?.length || r.refs?.champions?.length || r.refs?.traits?.length).length, [rows]);
 
   const chip = (active, color) => ({
     borderColor: active ? color : "var(--line)",
@@ -172,7 +177,7 @@ export default function Augments({ augmentMeta }) {
         <table className="w-full border-collapse" style={{ minWidth: 640 }}>
           <thead>
             <tr style={{ background: "var(--surface)" }}>
-              {[["Augment", "left"], ["Rarity", "center"], ["Type", "left"], ["Effect", "left"]].map(([h, align]) => (
+              {[["Augment", "left"], ["Rarity", "center"], ["Type", "left"], ["Links to", "left"]].map(([h, align]) => (
                 <th key={h}
                     className="text-[11px] uppercase tracking-wider font-semibold px-3 py-2.5 border-b whitespace-nowrap"
                     style={{ color: "var(--dim)", borderColor: "var(--line)", textAlign: align }}>
@@ -215,8 +220,49 @@ export default function Augments({ augmentMeta }) {
                   </span>
                 </td>
 
-                <td className="px-3 py-2 text-[11.5px] leading-snug" style={{ color: "var(--dim)", maxWidth: 420 }}>
-                  <span className="line-clamp-2">{a.description || "—"}</span>
+                {/* What this augment is tied to. The effect text lives in the
+                    hover card, so the column shows the connections instead:
+                    the champions and traits it names, and its own tiered
+                    variants. Blank where Riot's data supports no link. */}
+                <td className="px-3 py-2" style={{ maxWidth: 400 }}>
+                  <span className="flex items-center gap-1.5 flex-wrap">
+                    {a.refs?.champions?.map((cid) => (
+                      <span key={cid} className="flex items-center gap-1 rounded border px-1.5 py-[2px]"
+                            style={{ borderColor: "var(--line)" }}>
+                        <ChampionIcon src={championMeta?.[cid]?.icon} name={championMeta?.[cid]?.name || cid} size={16} />
+                        <span className="text-[10.5px]" style={{ color: "var(--dim)" }}>
+                          {championMeta?.[cid]?.name || cid}
+                        </span>
+                      </span>
+                    ))}
+                    {a.refs?.traits?.map((tid) => (
+                      <span key={tid} className="flex items-center gap-1 rounded border px-1.5 py-[2px]"
+                            style={{ borderColor: "var(--line)" }}>
+                        <TraitBadge name={traitMeta?.[tid]?.name || tid} meta={traitMeta?.[tid]}
+                                    size={14} showName={false} units={null} />
+                        <span className="text-[10.5px]" style={{ color: "var(--dim)" }}>
+                          {traitMeta?.[tid]?.name || tid}
+                        </span>
+                      </span>
+                    ))}
+                    {a.variants?.length > 0 && (
+                      <span className="flex items-center gap-1 flex-wrap">
+                        <span className="text-[9.5px] uppercase tracking-wider" style={{ color: "var(--faint)" }}>
+                          also
+                        </span>
+                        {a.variants.map((vid) => (
+                          <span key={vid} className="text-[10.5px] px-1.5 py-[2px] rounded border"
+                                style={{ borderColor: "var(--line)",
+                                         color: RARITY[augmentMeta?.[vid]?.rarity] || "var(--dim)" }}>
+                            {augmentMeta?.[vid]?.name || vid}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                    {!a.refs?.champions?.length && !a.refs?.traits?.length && !a.variants?.length && (
+                      <span style={{ color: "var(--faint)" }}>—</span>
+                    )}
+                  </span>
                 </td>
               </tr>
             ))}
@@ -230,8 +276,11 @@ export default function Augments({ augmentMeta }) {
       </div>
 
       <p className="text-[10px] mt-4 leading-snug" style={{ color: "var(--dim)" }}>
-        Type tags are inferred from effect text, not published by Riot. Rarity is recovered from
-        the augment's icon variant and is accurate for {counts.Silver + counts.Gold + counts.Prismatic} of {rows.length}.
+        “Links to” shows the champions and traits an augment names in its own effect text, plus
+        its tiered variants — {linked} of {rows.length} augments have such a link, and the rest are
+        blank rather than guessed. Riot publishes no augment-to-augment synergy data, and with no
+        augment records in the match API there is nothing to measure pairings from. Type tags are
+        inferred from effect text. Rarity is recovered from the augment's icon variant.
       </p>
     </div>
   );

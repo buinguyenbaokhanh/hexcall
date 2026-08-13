@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 
 from ingest import crawl
-from publish import publish, current_patch
+from publish import publish, current_patch, patch_filter
 
 log = logging.getLogger("scheduler")
 LOCK = Path("scheduler.lock")
@@ -77,10 +77,29 @@ def prune_old_patches(db: str, keep_patch: str) -> int:
     This is deliberate, not just housekeeping: after a balance patch the old
     data describes a game that no longer exists. Keeping it inflates your
     sample size while degrading accuracy, which is the worst trade available.
+
+    Uses publish.patch_filter for the pattern. Building it inline here is what
+    destroyed a 2,920-match store once already: live game_version reads
+    "Linux Version 16.16.804.9184 (...)", so a literal "Version 16.16.%"
+    prefix matched nothing, NOT LIKE therefore matched everything, and the
+    prune deleted the entire table the first time the detected patch changed.
+
+    The guard below is the real protection. A prune that would remove
+    everything is always a bug in the pattern rather than a genuine state --
+    even a total patch rollover leaves the matches just crawled on the new
+    one -- so it refuses instead of emptying the store.
     """
     conn = sqlite3.connect(db)
+    total = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
+    keeping = conn.execute("SELECT COUNT(*) FROM matches WHERE game_version LIKE ?",
+                           (patch_filter(keep_patch),)).fetchone()[0]
+    if total and keeping == 0:
+        log.error("refusing to prune: no match would survive keep_patch=%r "
+                  "(pattern %r matched 0 of %d rows) -- check game_version parsing",
+                  keep_patch, patch_filter(keep_patch), total)
+        return 0
     cur = conn.execute("DELETE FROM matches WHERE game_version NOT LIKE ?",
-                       (f"Version {keep_patch}.%",))
+                       (patch_filter(keep_patch),))
     conn.commit()
     return cur.rowcount
 

@@ -1,0 +1,78 @@
+# Deploy the site from data already committed to the repo.
+#
+# Separate from crawl.yml on purpose. That workflow crawls, publishes and
+# deploys in one job, which means a deploy can only ever be as good as a single
+# CI crawl -- and a single crawl on a development key does not reach the
+# publish threshold, so it produces an empty site. Crawling happens locally
+# where the match store accumulates across runs; this only ships the result.
+#
+# It needs no Riot API key, so it is safe to run at any time.
+
+name: deploy-site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "data/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; a half-published Pages artifact is worse than
+# waiting. Queue rather than cancel so a data update is not silently dropped.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Build web app
+        working-directory: app
+        env:
+          # A project Page is served from /<repo>/, so the bundle needs that
+          # base, and the app must read published JSON directly rather than
+          # calling /api -- there is no stats server on Pages.
+          VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_STATIC_MODE: "true"
+        run: |
+          npm ci
+          npm run build
+
+      - name: Assemble site
+        run: |
+          test -d data || { echo "::error::no data/ directory -- run scripts/stage-data.sh and commit"; exit 1; }
+          mkdir -p site
+          cp -r app/dist/* site/
+          mkdir -p site/data
+          cp -r data/* site/data/
+          echo "site contents:" && find site -maxdepth 2 -type d
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

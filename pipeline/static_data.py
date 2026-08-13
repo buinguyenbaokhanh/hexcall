@@ -129,6 +129,23 @@ _ICON_ARABIC = re.compile(r"([123])$")
 _NAME_ROMAN = re.compile(r"\s(I{1,3})$")
 
 
+_FAMILY_SUFFIX = re.compile(r"(\s+I{1,3}|\++)$")
+
+
+def _augment_family(name: str) -> str:
+    """Strip the tier marker so variants of one augment group together.
+
+    "Exiles I"/"Exiles II" and "Heroic Grab Bag"/"+"/"++" are the same augment
+    at different rarities. Applied repeatedly because a name can carry both
+    forms ("Band of Thieves II++").
+    """
+    prev = None
+    while prev != name:
+        prev = name
+        name = _FAMILY_SUFFIX.sub("", name).strip()
+    return name
+
+
 def _augment_rarity(entry: dict) -> int | None:
     stem = (entry.get("icon") or "").split("/")[-1].rsplit(".", 1)[0]
     m = _ICON_ROMAN.search(stem)
@@ -379,13 +396,24 @@ def build_item_meta(resolver: NameResolver) -> dict[str, dict]:
     except Exception:
         cdragon = {}
 
+    # Union of both catalogues, not just Data Dragon's. Match data contains
+    # items Data Dragon's tft-item.json never lists -- Radiant variants
+    # (TFT5_Item_*Radiant), Artifacts, and set-specific items like Set 17's
+    # Anima Squad tier-2s. Iterating Data Dragon alone left those with no name,
+    # icon or description, so they surfaced in the UI as prettified ids
+    # ("Anima Squad Item Tier2 Annihilator") with blank tooltips.
     out = {}
-    for item_id in resolver.static.get("items", {}):
+    for item_id in set(resolver.static.get("items", {})) | set(cdragon):
         entry = {
             "name": resolver.item(item_id),
             "icon": resolver.item_icon(item_id),
         }
         cd = cdragon.get(item_id)
+        if cd and cd.get("name"):
+            # CDragon is the better name source for anything Data Dragon lacks,
+            # where resolver.item() can only fall back to prettifying the id.
+            if item_id not in resolver.static.get("items", {}):
+                entry["name"] = cd["name"]
         if cd:
             entry["description"] = render_description(cd["desc"], cd["effects"])
             entry["stats"] = stat_rows(cd["effects"])
@@ -484,6 +512,11 @@ def build_augment_meta(resolver: NameResolver, set_number: int | str | None = No
     by_api = {i["apiName"]: i for i in raw.get("items", [])
               if i.get("isAugment") and i.get("apiName")}
 
+    live = live_set(raw, set_number)
+    champ_names = {c["name"]: c["apiName"] for c in live.get("champions", [])
+                   if c.get("name") and c.get("traits")}
+    trait_names = {t["name"]: t["apiName"] for t in live.get("traits", []) if t.get("name")}
+
     out = {}
     for aug_id in pool:
         entry = {
@@ -499,7 +532,33 @@ def build_augment_meta(resolver: NameResolver, set_number: int | str | None = No
             entry["traits"] = cd.get("associatedTraits") or []
             if not entry["icon"]:
                 entry["icon"] = cdragon_asset(cd.get("icon"))
+
+        # What this augment is actually tied to. Riot publishes
+        # associatedTraits for only 6 of the 274 augments in the pool, so the
+        # rest is recovered by matching the effect text against the live set's
+        # champion and trait names -- "Gain a Nasus" is an unambiguous
+        # reference, and matching against an authoritative name list avoids the
+        # guesswork a keyword heuristic would involve. Augments with no such
+        # reference get nothing rather than an invented pairing.
+        text = f"{entry.get('name') or ''} {entry.get('description') or ''}"
+        entry["refs"] = {
+            "champions": sorted({cid for name, cid in champ_names.items()
+                                 if re.search(rf"\b{re.escape(name)}\b", text)}),
+            "traits": sorted({tid for name, tid in trait_names.items()
+                              if re.search(rf"\b{re.escape(name)}\b", text)}
+                             | set(entry.get("traits") or [])),
+        }
         out[aug_id] = entry
+
+    # Tiered variants of the same augment ("Exiles I"/"Exiles II",
+    # "Heroic Grab Bag"/"+"/"++"). Knowing the Silver you were offered has a
+    # Prismatic version is real, useful context the effect text never states.
+    families: dict[str, list[str]] = {}
+    for aug_id, entry in out.items():
+        families.setdefault(_augment_family(entry.get("name") or aug_id), []).append(aug_id)
+    for aug_id, entry in out.items():
+        fam = families.get(_augment_family(entry.get("name") or aug_id), [])
+        entry["variants"] = sorted(a for a in fam if a != aug_id)
     return out
 
 

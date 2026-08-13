@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-from collections import defaultdict
+from collections import defaultdict, Counter
 from dataclasses import dataclass, field, asdict
 
 # Augment IDs matching these are excluded from all published stats.
@@ -52,6 +52,18 @@ TOP_HOLDERS_PER_ITEM = 8
 MIN_SAMPLES_ITEM = 40
 MIN_SAMPLES_TRAIT = 40
 MIN_SAMPLES_SLOT = 40
+
+# Head-to-head needs a floor of its own: two comps only meet in the subset of
+# lobbies where both were played, which is far smaller than either comp's own
+# sample.
+MIN_SAMPLES_VERSUS = 30
+TOP_COUNTERS_PER_COMP = 6
+
+# Traits used to IDENTIFY a comp, versus traits kept for describing it. The
+# signature uses the first; comp_shapes keeps SHAPE_TRAITS of them so the
+# publisher can disambiguate two comps that resolve to the same display name.
+SIGNATURE_TRAITS = 1
+SHAPE_TRAITS = 3
 
 # A standard TFT game offers three augments, at stages 2-1, 3-2 and 4-2.
 # tft-match-v1 returns the `augments` array in PICK ORDER, so the index is the
@@ -137,17 +149,36 @@ def comp_parts(participant: dict, top_n_traits: int = 3) -> tuple[list[tuple[str
     return parts, carry_unit(participant.get("units", []))
 
 
-def comp_signature(participant: dict, top_n_traits: int = 3) -> str:
+def comp_signature(participant: dict, top_n_traits: int = SIGNATURE_TRAITS) -> str:
     """Cluster a board into a named comp.
 
-    Signature = the strongest active traits (by breakpoint tier reached, then by
-    unit count) plus the carry. This produces labels like:
-        'Anima4_Stargazer2 :: TFT17_Xayah'
-    which you then map to human names ("Stargazer Xayah") in a lookup table,
-    or let publish.py derive one from comp_parts().
+    Signature = the strongest active trait (by breakpoint tier reached, then by
+    unit count) plus the carry, producing labels like
+        'TFT17_Stargazer :: TFT17_Xayah'
+    which publish.py turns into "4 Stargazer Xayah", taking the breakpoint from
+    the shape rather than the signature.
+
+    The unit count is deliberately NOT in the signature either. A deck that
+    runs 3 of its trait early and 5 late is one comp, and baking the count in
+    split it by depth on top of the permutation problem -- dropping it took
+    live signatures from 338 to 233 while raising the largest sample.
+
+    Only ONE trait, deliberately. Using the top three splits a single real comp
+    across every incidental trait permutation its flex slots happen to hit:
+        TFT17_DRX5_TFT17_ASTrait2_TFT17_HPTank2   :: TFT17_Kindred
+        TFT17_DRX5_TFT17_HPTank2_TFT17_MeleeTrait2 :: TFT17_Kindred
+    are the same deck under two labels. On live data that produced 827 distinct
+    signatures from 1,648 boards, the largest holding 64 -- so no comp ever
+    cleared the sample floor no matter how much was crawled, because the labels
+    fragment as fast as the data grows. One trait plus the carry is also how
+    comps are named in practice ("Conduit Miss Fortune").
+
+    The cost is real: two genuinely different builds around the same carry now
+    share a row. comp_shapes still carries the next traits, so the publisher
+    can tell near-collisions apart in the display name.
     """
     trait_parts, carry = comp_parts(participant, top_n_traits)
-    parts = [f"{name}{units}" for name, units in trait_parts]
+    parts = [name for name, _units in trait_parts]
     sig = "_".join(parts) if parts else "NoTraits"
     return f"{sig} :: {carry}" if carry else sig
 
@@ -251,15 +282,44 @@ def iter_participants(conn: sqlite3.Connection, game_version_like: str | None = 
     if platform:
         sql += " AND platform = ?"
         params.append(platform)
+    for lobby in _iter_lobbies_sql(conn, sql, params, queue_id, puuid_filter):
+        yield from lobby
+
+
+def _iter_lobbies_sql(conn, sql, params, queue_id, puuid_filter):
     for (raw,) in conn.execute(sql, params):
         m = json.loads(raw)
         info = m.get("info", {})
         if queue_id is not None and info.get("queue_id") not in (queue_id, None):
             continue
-        for p in info.get("participants", []):
-            if puuid_filter is not None and p.get("puuid") not in puuid_filter:
-                continue
-            yield p
+        lobby = [p for p in info.get("participants", [])
+                 if puuid_filter is None or p.get("puuid") in puuid_filter]
+        if lobby:
+            yield lobby
+
+
+def iter_lobbies(conn: sqlite3.Connection, game_version_like: str | None = None,
+                 tft_set: int | None = None, queue_id: int | None = 1100,
+                 platform: str | None = None, puuid_filter: set[str] | None = None):
+    """Same filtering as iter_participants, but yields each match's participants
+    together.
+
+    Grouping matters for anything comparative: "which comp beats which" can
+    only be answered by looking at boards that actually shared a lobby, and a
+    flat participant stream has thrown that away.
+    """
+    sql = "SELECT raw FROM matches WHERE 1=1"
+    params: list = []
+    if game_version_like:
+        sql += " AND game_version LIKE ?"
+        params.append(game_version_like)
+    if tft_set is not None:
+        sql += " AND tft_set = ?"
+        params.append(tft_set)
+    if platform:
+        sql += " AND platform = ?"
+        params.append(platform)
+    yield from _iter_lobbies_sql(conn, sql, params, queue_id, puuid_filter)
 
 
 def build_stats(conn: sqlite3.Connection, **filters) -> dict:
@@ -275,21 +335,53 @@ def build_stats(conn: sqlite3.Connection, **filters) -> dict:
     item_holder_stats: dict[tuple[str, str], Stat] = defaultdict(Stat)
     trait_stats: dict[tuple[str, int], Stat] = defaultdict(Stat)
     comp_shapes: dict[str, dict] = {}
+    comp_breakpoints: dict[str, Counter] = defaultdict(Counter)
+    versus: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
+    contested: dict[str, Counter] = defaultdict(Counter)
     total = 0
 
-    for p in iter_participants(conn, **filters):
+    for lobby in iter_lobbies(conn, **filters):
+      # Signatures for the whole lobby first, so head-to-head can be recorded
+      # between boards that actually played each other.
+      seats = []
+      for p in lobby:
+          if p.get("placement"):
+              seats.append((comp_signature(p), p["placement"]))
+      # How many OTHER boards in this lobby ran the same comp -- the honest
+      # measure of "contested", and only visible because we kept the lobby
+      # grouping. A comp that averages well but is usually contested by two
+      # others is a different proposition from one you get to yourself.
+      lobby_counts = Counter(sig for sig, _ in seats)
+      for sig, _ in seats:
+          contested[sig][lobby_counts[sig] - 1] += 1
+
+      for i, (sig_a, place_a) in enumerate(seats):
+          for sig_b, place_b in seats[i + 1:]:
+              if sig_a == sig_b or place_a == place_b:
+                  continue
+              key = (sig_a, sig_b) if sig_a < sig_b else (sig_b, sig_a)
+              first_wins = (place_a < place_b) if sig_a < sig_b else (place_b < place_a)
+              versus[key][0 if first_wins else 1] += 1
+
+      for p in lobby:
         placement = p.get("placement")
         if not placement:
             continue
         total += 1
-        trait_parts, carry = comp_parts(p)
-        parts = [f"{name}{units}" for name, units in trait_parts]
-        sig = "_".join(parts) if parts else "NoTraits"
+        # Shape keeps several traits for naming; the signature uses only the
+        # first, so incidental flex traits don't split one comp into many.
+        trait_parts, carry = comp_parts(p, SHAPE_TRAITS)
+        sig = "_".join(n for n, _ in trait_parts[:SIGNATURE_TRAITS]) or "NoTraits"
         if carry:
             sig = f"{sig} :: {carry}"
         # Kept so the publisher can build a readable name without trying to
-        # parse the signature back apart.
+        # parse the signature back apart. The breakpoint shown in that name is
+        # the MODAL one across the comp's boards, not whichever board happened
+        # to be seen first -- the signature no longer carries a count, so
+        # without this the displayed "5 Space Groove" would be arbitrary.
         comp_shapes.setdefault(sig, {"traits": trait_parts, "carry": carry})
+        if trait_parts:
+            comp_breakpoints[sig][trait_parts[0][1]] += 1
         comp_stats[sig].add(placement)
 
         # Slot is the index in the ORIGINAL array -- Legend augments have to be
@@ -453,6 +545,24 @@ def build_stats(conn: sqlite3.Connection, **filters) -> dict:
     for rows in traits.values():
         rows.sort(key=lambda r: r["units"])
 
+    # Head-to-head: of the lobbies where both comps were present, how often did
+    # each finish ahead. This is the one comparative statistic the match API
+    # genuinely supports -- placements within a shared lobby are directly
+    # comparable in a way two independent averages are not, because both boards
+    # faced the same eight players.
+    counters: dict[str, list[dict]] = defaultdict(list)
+    for (sig_a, sig_b), (wins_a, wins_b) in versus.items():
+        games = wins_a + wins_b
+        if games < MIN_SAMPLES_VERSUS or sig_a not in comps or sig_b not in comps:
+            continue
+        counters[sig_a].append({"comp": sig_b, "games": games,
+                                "win_rate": round(wins_a / games, 4)})
+        counters[sig_b].append({"comp": sig_a, "games": games,
+                                "win_rate": round(wins_b / games, 4)})
+    for rows in counters.values():
+        rows.sort(key=lambda r: r["win_rate"])
+        del rows[TOP_COUNTERS_PER_COMP:]
+
     return {
         "sample_size": total,
         "baseline_placement": round(baseline, 3),
@@ -464,7 +574,14 @@ def build_stats(conn: sqlite3.Connection, **filters) -> dict:
         "unit_items": {k: v for k, v in items.items() if v},
         "champions": champions,
         "champion_comps": dict(champion_comps),
-        "comp_shapes": {sig: comp_shapes[sig] for sig in comps},
+        "comp_shapes": {sig: _with_modal_breakpoint(comp_shapes[sig], comp_breakpoints[sig])
+                        for sig in comps},
+        "comp_versus": counters,
+        "comp_contested": {
+            sig: [{"others": k, "pct": round(v / sum(c.values()), 4)}
+                  for k, v in sorted(c.items())]
+            for sig, c in contested.items() if sig in comps
+        },
         "items": item_rows,
         "item_holders": dict(item_holders),
         "traits": dict(traits),
@@ -492,3 +609,12 @@ if __name__ == "__main__":
     print(f"{s['sample_size']} participants -> {len(s['comps'])} comps, "
           f"{len(s['augments'])} augments, {len(s['augment_comp_pairs'])} pairs, "
           f"{len(s['champions'])} champions")
+
+
+def _with_modal_breakpoint(shape: dict, counts) -> dict:
+    """Replace the headline trait's unit count with the comp's modal one."""
+    traits = list(shape.get("traits") or [])
+    if traits and counts:
+        name, _ = traits[0]
+        traits[0] = (name, counts.most_common(1)[0][0])
+    return {**shape, "traits": traits}

@@ -5,13 +5,14 @@ import {
 } from "lucide-react";
 import Review from "./Review.jsx";
 import CompBuild from "./CompBuild.jsx";
+import Advisor from "./Advisor.jsx";
 import Planner from "./Planner.jsx";
 import AugmentsTab from "./Augments.jsx";
 import ChampionsTab from "./Champions.jsx";
+import CompsTab from "./Comps.jsx";
 import ItemsTab from "./Items.jsx";
 import TraitsTab from "./Traits.jsx";
 import { ChampionIcon, AugmentIcon, carryIdFromSig } from "./icons.jsx";
-import { TierBadge, assignTiers } from "./tiers.jsx";
 import {
   buildIndex, evaluate, PlacementTrack, AxisLegend,
 } from "./scoring.jsx";
@@ -146,7 +147,7 @@ export default function App() {
   const championMeta = useCatalog("champion-meta", catalogVersion);
   const augmentMeta = useCatalog("augment-meta", catalogVersion);
   const traitMeta = useCatalog("trait-meta", catalogVersion);
-  const [tab, setTab] = useState("planner");
+  const [tab, setTab] = useState("advisor");
   const [openComp, setOpenComp] = useState(null);
   const [showInfo, setShowInfo] = useState(false);
   const [sliceMenu, setSliceMenu] = useState(false);
@@ -255,12 +256,13 @@ export default function App() {
 
         <div className="max-w-[1180px] mx-auto px-6 flex gap-1 -mb-px overflow-x-auto scroll-thin">
           {[
-            ["planner", "Planner", Sparkles],
-            ["comps", "Comps", Layers],
+            ["advisor", "Advisor", Sparkles],
+            ["planner", "Items I hold", Layers],
+            ["comps", "Comps", Swords],
             ["augments", "Augments", Zap],
-            ["champions", "Champions", Users],
-            ["items", "Items", Swords],
-            ["traits", "Traits", Hexagon],
+            ["champions", "Champions", Zap],
+            ["items", "Items", Hexagon],
+            ["traits", "Traits", Users],
             ["review", "Review My Games", History],
           ].map(([id, label, Icon]) => (
             <button key={id} onClick={() => setTab(id)}
@@ -279,46 +281,22 @@ export default function App() {
       <main className="max-w-[1180px] mx-auto px-6 py-6">
         <StatusBanner status={status} error={error} onRetry={() => setSlice(sliceId)} />
 
+        {tab === "advisor" && (
+          <Advisor stats={stats} augmentMeta={augmentMeta} itemMeta={itemMeta}
+                   traitMeta={traitMeta} onOpenComp={setOpenComp} />
+        )}
+
         {tab === "planner" && (
           <Planner stats={stats} itemMeta={itemMeta} onOpenComp={setOpenComp} />
         )}
 
         {tab === "comps" && (
-          <div>
-            <h2 className="display text-[15px] font-semibold mb-0.5">Composition tier list</h2>
-            <p className="text-[11.5px] mb-3" style={{ color: "var(--dim)" }}>
-              Tiered by average placement percentile within this slice · {baseline.length} comps
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {assignTiers(baseline, "avg_placement").map((c) => (
-                <button key={c.sig} onClick={() => setOpenComp(c)}
-                        className="text-left rounded-lg border px-3 py-2.5 row-hover flex items-center gap-3"
-                        style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
-                  <TierBadge tier={c.tier} />
-                  <ChampionIcon src={stats.champion_icons?.[carryIdFromSig(c.sig)]} name={c.name} size={32} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline justify-between gap-2 mb-1">
-                      <span className="text-[13px] font-medium truncate">{c.name}</span>
-                      <span className="mono text-[17px] font-bold shrink-0"
-                            style={{ color: c.avg_placement < stats.baseline_placement ? "var(--signal)" : "var(--text)" }}>
-                        {c.avg_placement.toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="h-[3px] rounded-full overflow-hidden mb-1" style={{ background: "var(--faint)" }}>
-                      <div className="h-full rounded-full"
-                           style={{ width: `${c.top4_rate * 100}%`, background: "var(--signal)" }} />
-                    </div>
-                    <p className="mono text-[10.5px]" style={{ color: "var(--dim)" }}>
-                      {(c.top4_rate * 100).toFixed(0)}% top4 · {(c.win_rate * 100).toFixed(1)}% first · n={c.n.toLocaleString()}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
+          <CompsTab stats={stats} traitMeta={traitMeta} itemMeta={itemMeta}
+                    apiBase={API_BASE} staticMode={STATIC_MODE} sliceId={sliceId}
+                    onOpenComp={setOpenComp} />
         )}
 
-        {tab === "augments" && <AugmentsTab augmentMeta={augmentMeta} />}
+        {tab === "augments" && <AugmentsTab augmentMeta={augmentMeta} championMeta={championMeta} traitMeta={traitMeta} />}
 
         {tab === "champions" && <ChampionsTab stats={stats} championMeta={championMeta}
                                               itemMeta={itemMeta} traitMeta={traitMeta} />}

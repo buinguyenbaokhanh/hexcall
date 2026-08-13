@@ -16,11 +16,18 @@ function categoryOf(id, meta) {
   if (/Emblem/i.test(name)) return "Emblem";
   if (/Radiant/i.test(name)) return "Radiant";
   if (/Artifact|Ornn/i.test(name)) return "Artifact";
-  if (!meta?.recipe || meta.recipe.length === 0) return "Component";
-  return "Completed";
+  // Set-specific item lines (Set 17's Anima Squad tier-2s, and the same shape
+  // in earlier sets) are their own class: they aren't crafted from components
+  // and would otherwise be miscounted as basic components.
+  if (/Item_Tier\d|SquadItem|Support|Trainer/i.test(id)) return "Special";
+  if (meta?.recipe?.length) return "Completed";
+  // A real component is an ingredient in something. Anything with no recipe
+  // that nothing is built from is a one-off (Empty Bag, consumables) rather
+  // than a component you hold and combine.
+  return meta?.isComponent ? "Component" : "Special";
 }
 
-const CATEGORIES = ["Completed", "Component", "Emblem", "Radiant", "Artifact"];
+const CATEGORIES = ["Completed", "Component", "Radiant", "Artifact", "Emblem", "Special"];
 
 const SORTS = {
   placement: { label: "Placement", fn: (a, b) => a.avg_placement - b.avg_placement },
@@ -77,17 +84,30 @@ export default function Items({ stats, itemMeta }) {
   const [sortBy, setSortBy] = useState("placement");
   const [openId, setOpenId] = useState(null);
 
+  // Which ids are actually ingredients in some recipe -- the only reliable way
+  // to tell a real component from a no-recipe one-off.
+  const componentIds = useMemo(() => {
+    const s = new Set();
+    for (const m of Object.values(itemMeta || {})) {
+      for (const c of m.recipe || []) s.add(c.id);
+    }
+    return s;
+  }, [itemMeta]);
+
   const rows = useMemo(() => {
-    const raw = Object.entries(stats.items || {}).map(([id, s]) => ({
-      id,
-      name: stats.item_names?.[id] || itemMeta[id]?.name || id,
-      icon: stats.item_icons?.[id] || itemMeta[id]?.icon,
-      category: categoryOf(id, itemMeta[id]),
-      holders: stats.item_holders?.[id] || [],
-      ...s,
-    }));
+    const raw = Object.entries(stats.items || {}).map(([id, s]) => {
+      const meta = itemMeta[id];
+      return {
+        id,
+        name: meta?.name || stats.item_names?.[id] || id,
+        icon: meta?.icon || stats.item_icons?.[id],
+        category: categoryOf(id, meta && { ...meta, isComponent: componentIds.has(id) }),
+        holders: stats.item_holders?.[id] || [],
+        ...s,
+      };
+    });
     return assignTiers(raw, "avg_placement");
-  }, [stats, itemMeta]);
+  }, [stats, itemMeta, componentIds]);
 
   const counts = useMemo(() => {
     const c = { all: rows.length };
