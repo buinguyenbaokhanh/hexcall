@@ -4,6 +4,7 @@ import { AugmentIcon, ChampionIcon, ItemIcon, carryIdFromSig } from "./icons.jsx
 import { HoverCard } from "./HoverCard.jsx";
 import { TraitBadge } from "./TraitBadge.jsx";
 import { rankComps, pivotAdvice, augmentTypes, fitScore } from "./fit.jsx";
+import { TeamCodeButton } from "./Comps.jsx";
 
 const RARITY = { Silver: "#9FB0C4", Gold: "#F0B429", Prismatic: "#8FE3D2" };
 const STAGES = [
@@ -69,10 +70,13 @@ function CompCard({ comp, stats, itemMeta, traitMeta, onOpen, highlight }) {
             {p.reroll ? ` · rerolls ${p.three_stars.join(", ")}` : ""}
           </p>
         </div>
-        <p className="mono text-[19px] font-bold shrink-0"
-           style={{ color: comp.avg_placement < stats.baseline_placement ? "var(--signal)" : "var(--text)" }}>
-          {comp.avg_placement.toFixed(2)}
-        </p>
+        <span className="text-right shrink-0">
+          <p className="mono text-[19px] font-bold"
+             style={{ color: comp.avg_placement < stats.baseline_placement ? "var(--signal)" : "var(--text)" }}>
+            {comp.avg_placement.toFixed(2)}
+          </p>
+          <span className="flex justify-end mt-1"><TeamCodeButton code={comp.team_code} /></span>
+        </span>
       </div>
 
       {comp.board?.length > 0 && (

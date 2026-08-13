@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Search, ChevronDown, ChevronUp, Swords, Loader2 } from "lucide-react";
+import { Search, ChevronDown, ChevronUp, Swords, Loader2, Copy, Check } from "lucide-react";
 import { UnitsPane, ItemsPane, TraitsPane, StatsPane } from "./CompPanes.jsx";
 import { ChampionIcon, ItemIcon, carryIdFromSig } from "./icons.jsx";
 import { TraitBadge } from "./TraitBadge.jsx";
@@ -10,6 +10,53 @@ const TIERS = ["S", "A", "B", "C", "D"];
 // Star colour follows the game's rarity ramp, so 3-star reroll units stand out
 // from the 2-star standard board at a glance.
 const STAR_COLOR = { "1": "#9FB0C4", "2": "#F0B429", "3": "#8FE3D2" };
+
+/**
+ * Copies the comp's in-game Team Planner share code, so a player can paste the
+ * board into the client instead of adding ten units by hand.
+ *
+ * Uses navigator.clipboard where available and falls back to a hidden textarea
+ * plus execCommand -- the async Clipboard API is unavailable on insecure
+ * origins, which includes the http://localhost dev server this is used from.
+ */
+export function TeamCodeButton({ code, className = "" }) {
+  const [copied, setCopied] = useState(false);
+  if (!code) return null;
+
+  const copy = async (e) => {
+    e.stopPropagation();
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = code;
+        ta.style.cssText = "position:fixed;opacity:0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <button onClick={copy} title="Copy the in-game Team Planner code"
+            className={`flex items-center gap-1.5 text-[11px] px-2 py-1 rounded border transition-colors ${className}`}
+            style={{
+              borderColor: copied ? "var(--signal)" : "var(--line)",
+              color: copied ? "var(--signal)" : "var(--dim)",
+              background: copied ? "color-mix(in srgb, var(--signal) 12%, transparent)" : "transparent",
+            }}>
+      {copied ? <Check size={11} /> : <Copy size={11} />}
+      {copied ? "Copied" : "Team code"}
+    </button>
+  );
+}
 
 function Unit({ u, itemMeta, size = 30 }) {
   return (
@@ -369,11 +416,14 @@ export default function Comps({ stats, traitMeta, itemMeta, onOpenComp, apiBase,
                     <p className="text-[9px] uppercase tracking-wider mt-0.5" style={{ color: "var(--dim)" }}>
                       pick rate
                     </p>
+                    <div className="mt-2 flex items-center justify-end gap-1.5">
+                      <TeamCodeButton code={c.team_code} />
                     <button onClick={() => setExpanded(open ? null : c.sig)}
-                            className="mt-2 p-1 rounded row-hover" aria-label="Toggle detail">
+                            className="p-1 rounded row-hover" aria-label="Toggle detail">
                       {open ? <ChevronUp size={15} style={{ color: "var(--dim)" }} />
                             : <ChevronDown size={15} style={{ color: "var(--dim)" }} />}
                     </button>
+                    </div>
                   </div>
                 </div>
 

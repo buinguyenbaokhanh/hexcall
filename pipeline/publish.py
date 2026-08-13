@@ -43,6 +43,7 @@ from pathlib import Path
 
 from aggregate import build_stats, puuids_for_tiers
 from comp_detail import build_comp_details, slug
+from static_data import team_planner_codes, team_planner_code
 
 log = logging.getLogger("publish")
 
@@ -288,6 +289,12 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
         log.warning("Data Dragon unavailable (%s); falling back to ID prettifier", e)
         resolver = None
 
+    try:
+        planner_codes = team_planner_codes(tft_set)
+    except Exception:
+        log.exception("team planner codes unavailable; comps ship without share codes")
+        planner_codes = {}
+
     manifest = {"generated_at": int(time.time()), "patch": patch,
                 "tft_set": tft_set, "slices": []}
 
@@ -352,6 +359,15 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
                 stats["comps"][sig]["traits"] = base.get("traits", [])[:6]
                 stats["comps"][sig]["levels"] = base.get("level_curve", [])
                 stats["comps"][sig]["profile"] = comp_profile(base)
+                # Share code for the in-game Team Planner. Carry first so the
+                # unit the comp is built around lands in the first slot.
+                if planner_codes:
+                    board = stats["comps"][sig]["board"]
+                    ordered = ([u["id"] for u in board if u.get("carry")]
+                               + [u["id"] for u in board if not u.get("carry")])
+                    code = team_planner_code(ordered, planner_codes, tft_set)
+                    if code:
+                        stats["comps"][sig]["team_code"] = code
             log.info("  %d comp detail docs for %s", len(details), sd["id"])
 
         meta = _write(out / f"{sd['id']}.json", stats)

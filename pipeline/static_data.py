@@ -81,6 +81,54 @@ def _fetch_cdragon_raw() -> dict:
     return raw
 
 
+# The in-game Team Planner accepts a share code, so a comp can be loaded into
+# the client instead of copied unit by unit. Riot publishes the per-champion
+# number the code is built from, which is the only reliable source: community
+# write-ups describe deriving it by sorting the roster alphabetically, and that
+# ordering does not match the published values (Set 17 assigns Briar 14 and
+# Miss Fortune 1, which no alphabetical sort produces).
+CDRAGON_TEAMPLANNER_URL = (
+    "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/"
+    "global/default/v1/tftchampions-teamplanner.json"
+)
+TEAMPLANNER_CACHE = CACHE / "tft_teamplanner.json"
+
+
+def team_planner_codes(set_number: int | str | None = None) -> dict[str, int]:
+    """{character_id: team planner code} for one set."""
+    if TEAMPLANNER_CACHE.exists():
+        raw = json.loads(TEAMPLANNER_CACHE.read_text())
+    else:
+        raw = requests.get(CDRAGON_TEAMPLANNER_URL, timeout=60).json()
+        CACHE.mkdir(exist_ok=True)
+        TEAMPLANNER_CACHE.write_text(json.dumps(raw))
+
+    key = f"TFTSet{set_number}" if set_number is not None else None
+    if key not in raw:
+        # Fall back to the highest set present, matching live_set's behaviour.
+        keys = [k for k in raw if k.startswith("TFTSet") and k[6:].isdigit()]
+        key = max(keys, key=lambda k: int(k[6:])) if keys else None
+    if not key:
+        return {}
+    return {c["character_id"]: c["team_planner_code"] for c in raw[key]
+            if c.get("character_id") and c.get("team_planner_code")}
+
+
+def team_planner_code(champion_ids: list[str], codes: dict[str, int],
+                      set_number: int | str, max_units: int = 10) -> str | None:
+    """Build a Team Planner share code from a list of champions.
+
+    Format is "01" + one 2-digit hex byte per unit + "TFTSet<N>". Code 0 is
+    both the blank slot and a PvE unit, so anything without a real code is
+    dropped rather than emitted as an empty slot.
+    """
+    body = "".join(f"{codes[c]:02x}" for c in champion_ids[:max_units]
+                   if codes.get(c))
+    if not body:
+        return None
+    return f"01{body}TFTSet{set_number}"
+
+
 def cdragon_asset(path: str | None) -> str | None:
     """Internal CDragon asset path -> fetchable PNG URL."""
     if not path:
