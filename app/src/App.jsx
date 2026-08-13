@@ -337,7 +337,7 @@ export default function App() {
               style={{ borderColor: "var(--line)" }}>
         <div className="flex items-start justify-between gap-6 flex-wrap">
           <p className="text-[10.5px] leading-relaxed max-w-[640px]" style={{ color: "var(--dim)" }}>
-            Hexcall isn't endorsed by Riot Games and doesn't reflect the views or opinions of
+            HexCall isn't endorsed by Riot Games and doesn't reflect the views or opinions of
             Riot Games or anyone officially involved in producing or managing Riot Games
             properties. Riot Games and all associated properties are trademarks or registered
             trademarks of Riot Games, Inc. Match data is retrieved from the Riot Games API;

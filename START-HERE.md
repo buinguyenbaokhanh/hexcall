@@ -1,4 +1,4 @@
-# Hexcall — how to run it
+# HexCall — how to run it
 
 Everything below has been run end-to-end. The build is clean (58 KB gzipped),
 the demo path works without an API key, and the dev stack serves real published

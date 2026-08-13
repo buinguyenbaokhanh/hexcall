@@ -18,7 +18,7 @@ safer than rewriting history. Do both.
 ## 2. First commit
 
 ```bash
-git commit -m "Hexcall: TFT decision-assist tool with conditional comp statistics"
+git commit -m "HexCall: TFT decision-assist tool with conditional comp statistics"
 git branch -M main
 git remote add origin git@github.com:YOU/hexcall.git
 git push -u origin main

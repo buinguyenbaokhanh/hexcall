@@ -1,4 +1,4 @@
-# Hexcall
+# HexCall
 
 A Teamfight Tactics decision-assist tool. It aggregates ranked match data from the
 Riot API, computes **conditional** comp statistics, and tells you which composition
