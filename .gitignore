@@ -1,0 +1,28 @@
+# secrets — never commit these
+.env
+.env.*
+*.key
+riot_key*
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# node
+node_modules/
+app/dist/
+
+# generated data
+pipeline/tft.db
+# SQLite side files: transient, and present whenever a crawl is mid-write.
+pipeline/tft.db-journal
+pipeline/tft.db-wal
+pipeline/tft.db-shm
+pipeline/public/
+pipeline/ddragon_cache/
+pipeline/scheduler.lock
+pipeline/scheduler_state.json
+pipeline/stats*.json
+pipeline/review.json
+crawl.log

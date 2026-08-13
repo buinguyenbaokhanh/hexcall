@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(./setup.sh *)",
+      "Bash(../.venv/bin/python demo.py)",
+      "Bash(../.venv/bin/python server.py)",
+      "Bash(npm run *)",
+      "Bash(../.venv/bin/python -c ' *)",
+      "Bash(../.venv/bin/python *)"
+    ]
+  }
+}
