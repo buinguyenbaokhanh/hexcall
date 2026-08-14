@@ -183,7 +183,11 @@ export default function App() {
         body { font-family: 'Inter', system-ui, sans-serif; }
         .display { font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.01em; }
         .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
-        .scroll-thin::-webkit-scrollbar { width: 5px; }
+        /* Height as well as width: the tab strip and the stats tables scroll
+           HORIZONTALLY, and a rule that sets only width leaves those with the
+           browser's ~15px default bar -- a grey slab across the header once
+           the tabs outgrow the viewport. */
+        .scroll-thin::-webkit-scrollbar { width: 5px; height: 5px; }
         .scroll-thin::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 3px; }
         .scroll-thin::-webkit-scrollbar-track { background: transparent; }
         .row-hover { transition: background 140ms ease, border-color 140ms ease; }
