@@ -1,5 +1,10 @@
 import React, { useState } from "react";
-import { Search, AlertTriangle, AlertCircle, CheckCircle2, Loader2, ChevronDown } from "lucide-react";
+import {
+  Search, AlertTriangle, AlertCircle, CheckCircle2, Loader2, Target, Sparkles,
+} from "lucide-react";
+import { ChampionIcon, ItemIcon } from "./icons.jsx";
+import { TraitBadge } from "./TraitBadge.jsx";
+import { SegmentedToggle, COST_COLORS, num } from "./table.jsx";
 
 const PLATFORMS = [
   ["na1","NA"],["euw1","EUW"],["eun1","EUNE"],["kr","KR"],["jp1","JP"],["br1","BR"],
@@ -8,32 +13,176 @@ const PLATFORMS = [
 ];
 
 const SEV = {
-  high:   { Icon: AlertTriangle, color: "var(--danger)", rank: "Fix first" },
-  medium: { Icon: AlertCircle,   color: "var(--warn)",   rank: "Watch" },
-  ok:     { Icon: CheckCircle2,  color: "var(--signal)", rank: "Fine" },
+  high:   { Icon: AlertTriangle, color: "var(--danger)" },
+  medium: { Icon: AlertCircle,   color: "var(--warn)" },
+  ok:     { Icon: CheckCircle2,  color: "var(--signal)" },
 };
 
-const P_MIN = 1, P_MAX = 8;
-const pct = (p) => ((p - P_MIN) / (P_MAX - P_MIN)) * 100;
+const TONE = { good: "var(--signal)", bad: "var(--danger)", accent: "var(--accent)", neutral: "var(--dim)" };
 
-export default function Review({ apiBase, sliceId, staticMode }) {
+const P_MIN = 1, P_MAX = 8;
+const axisPct = (p) => ((p - P_MIN) / (P_MAX - P_MIN)) * 100;
+
+const STAR_COLOR = { 1: "#9FB0C4", 2: "#C9A227", 3: "#F0B429", 4: "#8FE3D2" };
+
+function timeAgo(ms) {
+  if (!ms) return "";
+  const h = Math.floor((Date.now() - ms) / 3600000);
+  if (h < 1) return "just now";
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return d < 30 ? `${d}d ago` : `${Math.floor(d / 30)}mo ago`;
+}
+
+/** One unit on a finished board: star level, cost-tinted portrait, its items. */
+function BoardUnit({ unit }) {
+  const color = COST_COLORS[unit.cost] || "var(--line)";
+  return (
+    <span className="flex flex-col items-center gap-[3px] shrink-0" title={unit.name}>
+      <span className="mono text-[9px] leading-none" style={{ color: STAR_COLOR[unit.star] || "var(--faint)" }}>
+        {"★".repeat(Math.min(unit.star || 1, 4))}
+      </span>
+      <span className="rounded-md p-[1.5px]" style={{ border: `1.5px solid ${color}` }}>
+        <ChampionIcon src={unit.icon} name={unit.name} size={30} className="!rounded-md" />
+      </span>
+      <span className="flex gap-[2px] h-[14px]">
+        {unit.item_icons?.map((src, i) => (
+          <ItemIcon key={i} src={src} name={unit.items?.[i]} size={13} />
+        ))}
+      </span>
+    </span>
+  );
+}
+
+/** Where you sit on one measured axis of playstyle. */
+function AxisBar({ axis }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="text-[11px] w-[86px] text-right shrink-0" style={{ color: "var(--dim)" }}>
+        {axis.left}
+      </span>
+      <span className="relative flex-1 h-[3px] rounded" style={{ background: "var(--faint)" }}>
+        <span className="absolute w-[11px] h-[11px] rounded-full -top-1 -translate-x-1/2"
+              style={{ left: `${axis.value * 100}%`, background: "var(--accent)" }} />
+      </span>
+      <span className="text-[11px] w-[86px] shrink-0" style={{ color: "var(--dim)" }}>{axis.right}</span>
+    </div>
+  );
+}
+
+function LeakCard({ leak }) {
+  const cfg = SEV[leak.severity] || SEV.ok;
+  const { Icon } = cfg;
+  return (
+    <div className="rounded-lg border px-4 py-3.5"
+         style={{ background: "var(--surface)", borderColor: "var(--line)",
+                  borderLeftWidth: 2, borderLeftColor: cfg.color }}>
+      <div className="flex items-start gap-3">
+        <Icon size={15} style={{ color: cfg.color }} className="mt-[2px] shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline justify-between gap-3 flex-wrap">
+            <span className="display text-[13px]">{leak.title}</span>
+            <span className="mono text-[11.5px] shrink-0" style={{ color: cfg.color }}>{leak.metric}</span>
+          </div>
+          <p className="text-[12px] mt-1 leading-relaxed" style={{ color: "var(--dim)" }}>{leak.detail}</p>
+
+          {/* Itemisation is the one leak that names its own fix, so it gets a
+              side-by-side rather than a sentence. */}
+          {leak.builds?.length > 0 && (
+            <div className="mt-2.5 space-y-1.5">
+              {leak.builds.map((b, i) => (
+                <div key={i} className="flex items-center gap-2.5 flex-wrap rounded border px-2.5 py-1.5"
+                     style={{ borderColor: "var(--line)" }}>
+                  <span className="text-[11.5px] w-24 shrink-0 truncate">{b.carry}</span>
+                  <span className="flex items-center gap-1">
+                    {b.yours_icons?.map((src, j) => (
+                      <ItemIcon key={j} src={src} name={b.yours[j]} size={20} />
+                    ))}
+                  </span>
+                  <span className="text-[11px]" style={{ color: "var(--faint)" }}>→</span>
+                  <span className="flex items-center gap-1">
+                    {(b.best_icons?.length ? b.best_icons : b.best).map((src, j) => (
+                      <ItemIcon key={j} src={b.best_icons?.length ? src : null} name={b.best[j]} size={20} />
+                    ))}
+                  </span>
+                  <span className="mono text-[11px] ml-auto shrink-0"
+                        style={{ color: b.gap == null ? "var(--faint)" : "var(--danger)" }}>
+                    {b.gap == null ? "no measured sample" : `+${b.gap}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {leak.table && (
+            <div className="mt-2.5 space-y-1">
+              {leak.table.map((r) => (
+                <div key={r.comp} className="flex items-center justify-between gap-3 text-[11px]">
+                  <span className="truncate">{r.comp}
+                    <span className="mono ml-1.5" style={{ color: "var(--faint)" }}>{r.games}g</span>
+                  </span>
+                  <span className="mono shrink-0" style={{ color: "var(--dim)" }}>
+                    {r.your_avg} vs {r.field_avg}
+                    <span className="ml-2" style={{ color: r.gap > 0 ? "var(--danger)" : "var(--signal)" }}>
+                      {r.gap > 0 ? "+" : ""}{r.gap}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {leak.examples?.length > 0 && (
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {leak.examples.map((ex, i) => (
+                <span key={i} className="mono text-[10px] rounded px-2 py-1 border"
+                      style={{ borderColor: "var(--line)", color: "var(--dim)" }}>
+                  {ex.comp ? `${ex.comp} · ${ex.augment} ${ex.lift > 0 ? "+" : ""}${ex.lift}`
+                           : `${ex.gold}g left · placed ${ex.placement}`}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {leak.caveat && (
+            <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--faint)" }}>{leak.caveat}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Personal review.
+ *
+ * The tier-list tabs answer "what is strong". This answers "what are YOU doing
+ * wrong", which is the only question on the site whose answer differs per
+ * person -- and the reason to build this rather than read someone else's.
+ *
+ * Everything here is derived from end-of-game state plus lobby comparison.
+ * match-v1 has no round timeline, so nothing on this page claims to know what
+ * happened during a game; it reports the state you ended in and how that
+ * compares with the players who ended alongside you.
+ */
+export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} }) {
   const [riotId, setRiotId] = useState("");
   const [platform, setPlatform] = useState("na1");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [showGames, setShowGames] = useState(false);
+  const [view, setView] = useState("fixes");
 
   const run = async () => {
     if (!riotId.includes("#")) { setError("Enter your Riot ID as GameName#TAG"); return; }
     setLoading(true); setError(null);
     try {
       const r = await fetch(
-        `${apiBase}/review?riot_id=${encodeURIComponent(riotId)}&platform=${platform}&slice=${sliceId || "global-apex"}`
+        `${apiBase}/review?riot_id=${encodeURIComponent(riotId)}&platform=${platform}&slice=${sliceId || "global-all"}`
       );
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      setData(j);
+      setData(j); setView("fixes");
     } catch (e) {
       setError(String(e.message || e)); setData(null);
     } finally { setLoading(false); }
@@ -62,8 +211,7 @@ export default function Review({ apiBase, sliceId, staticMode }) {
   }
 
   return (
-    <div className="max-w-[760px]">
-      {/* Search */}
+    <div className="max-w-[900px]">
       <div className="rounded-lg border p-4 mb-5"
            style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
         <h2 className="display text-[13px] mb-1">Review your recent games</h2>
@@ -101,7 +249,7 @@ export default function Review({ apiBase, sliceId, staticMode }) {
               <div className="mt-2 pt-2 border-t" style={{ borderColor: "var(--line)", color: "var(--dim)" }}>
                 <p className="mb-1.5">The server needs a Riot API key. Stop it (Ctrl+C), then restart with:</p>
                 <code className="mono text-[10.5px] block rounded p-2" style={{ background: "var(--bg)", color: "var(--signal)" }}>
-                  $env:RIOT_API_KEY = "RGAPI-..."<br />..\.venv\Scripts\python.exe server.py
+                  export RIOT_API_KEY=RGAPI-...<br />../.venv/bin/python server.py
                 </code>
                 <p className="mt-1.5">Development keys expire every 24 hours.</p>
               </div>
@@ -120,7 +268,6 @@ export default function Review({ apiBase, sliceId, staticMode }) {
             </div>
           )}
 
-          {/* Headline: your placement vs field, on the same axis as everything else */}
           <div className="rounded-lg border p-4 mb-4" style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
             <div className="flex items-baseline justify-between mb-3 gap-4 flex-wrap">
               <span className="display text-[13px]">Your average placement</span>
@@ -138,34 +285,40 @@ export default function Review({ apiBase, sliceId, staticMode }) {
             <div className="relative h-4 mb-1">
               {[1,2,3,4,5,6,7,8].map((t) => (
                 <span key={t} className="absolute mono text-[9.5px] -translate-x-1/2"
-                      style={{ left: `${pct(t)}%`, color: "var(--faint)" }}>{t}</span>
+                      style={{ left: `${axisPct(t)}%`, color: "var(--faint)" }}>{t}</span>
               ))}
             </div>
             <div className="relative h-6">
               <div className="absolute left-0 right-0 top-[11px] h-px" style={{ background: "var(--line)" }} />
-              <div className="absolute top-[4px] h-[15px] w-px" style={{ left: `${pct(s.field_avg)}%`, background: "var(--dim)" }} />
+              <div className="absolute top-[4px] h-[15px] w-px" style={{ left: `${axisPct(s.field_avg)}%`, background: "var(--dim)" }} />
               <div className="absolute top-[4px] transition-all duration-500"
-                   style={{ left: `${pct(s.avg_placement)}%`, transform: "translateX(-50%)" }}>
+                   style={{ left: `${axisPct(s.avg_placement)}%`, transform: "translateX(-50%)" }}>
                 <div className="w-[15px] h-[15px] rotate-45 rounded-[3px]"
                      style={{ background: s.avg_placement < s.field_avg ? "var(--signal)" : "var(--danger)" }} />
               </div>
             </div>
 
-            {/* Placement histogram */}
-            <div className="flex items-end gap-1 h-16 mt-4">
+            {/* The bar's percentage height needs a parent with a definite
+                height to resolve against. The column is auto-height (its own
+                content), so the bar gets its own flex-1 track -- without it
+                every bar collapses to its 3px minimum. */}
+            <div className="flex gap-1 h-20 mt-4">
               {Object.entries(s.placement_counts).map(([place, n]) => {
                 const max = Math.max(...Object.values(s.placement_counts), 1);
                 return (
                   <div key={place} className="flex-1 flex flex-col items-center gap-1">
                     <span className="mono text-[9.5px]" style={{ color: "var(--dim)" }}>{n || ""}</span>
-                    <div className="w-full rounded-t-[2px] transition-all"
-                         style={{ height: `${(n / max) * 100}%`, minHeight: n ? 3 : 0,
-                                  background: Number(place) <= 4 ? "var(--signal)" : "var(--faint)" }} />
+                    <div className="w-full flex-1 flex items-end">
+                      <div className="w-full rounded-t-[2px] transition-all"
+                           style={{ height: `${(n / max) * 100}%`, minHeight: n ? 3 : 0,
+                                    background: Number(place) <= 4 ? "var(--signal)" : "var(--faint)" }} />
+                    </div>
                     <span className="mono text-[9.5px]" style={{ color: "var(--dim)" }}>{place}</span>
                   </div>
                 );
               })}
             </div>
+
             <div className="flex gap-5 mt-3 pt-3 border-t" style={{ borderColor: "var(--line)" }}>
               {[["top 4", `${(s.top4_rate*100).toFixed(0)}%`, "50% is even"],
                 ["firsts", `${(s.win_rate*100).toFixed(0)}%`, "12.5% is even"],
@@ -177,99 +330,156 @@ export default function Review({ apiBase, sliceId, staticMode }) {
                 </div>
               ))}
             </div>
+
+            {data.tags?.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t" style={{ borderColor: "var(--line)" }}>
+                {data.tags.map((t) => (
+                  <span key={t.id} title={`${t.detail} · ${t.criteria}`}
+                        className="text-[11.5px] rounded-full border px-2.5 py-1"
+                        style={{ color: TONE[t.tone] || "var(--dim)",
+                                 borderColor: `color-mix(in srgb, ${TONE[t.tone] || "var(--dim)"} 45%, transparent)` }}>
+                    {t.label}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
-          <h3 className="display text-[13px] mb-2.5">What's costing you placements</h3>
-          <div className="space-y-2">
-            {data.leaks.map((leak) => {
-              const cfg = SEV[leak.severity] || SEV.ok;
-              const { Icon } = cfg;
-              return (
-                <div key={leak.id} className="rounded-lg border px-4 py-3.5"
+          <div className="mb-3">
+            <SegmentedToggle value={view} onChange={setView}
+                             options={[["fixes", "Fix list"], ["tags", "Playstyle"],
+                                       ["games", `Recent games (${data.recent.length})`]]} />
+          </div>
+
+          {view === "fixes" && (
+            <>
+              {data.plan?.length > 0 ? (
+                <div className="rounded-lg border p-4 mb-4"
+                     style={{ background: "var(--surface)", borderColor: "var(--accent)33" }}>
+                  <p className="display text-[13px] mb-0.5 flex items-center gap-1.5">
+                    <Target size={14} style={{ color: "var(--accent)" }} />
+                    Change these, in this order
+                  </p>
+                  <p className="text-[11px] mb-3" style={{ color: "var(--faint)" }}>
+                    Ordered by what's costing you most. Three at a time — a list of eleven
+                    things to fix is a list of nothing to fix.
+                  </p>
+                  <ol className="space-y-2.5">
+                    {data.plan.map((p, i) => (
+                      <li key={p.leak} className="flex gap-3">
+                        <span className="mono text-[13px] shrink-0" style={{ color: "var(--accent)" }}>{i + 1}</span>
+                        <div className="min-w-0">
+                          <p className="text-[12.5px] leading-relaxed">{p.do}</p>
+                          <p className="text-[10.5px] mt-1 flex items-center gap-1.5 flex-wrap"
+                             style={{ color: "var(--faint)" }}>
+                            <span>{p.title} · {p.metric}</span>
+                            {p.tailored && (
+                              <span className="flex items-center gap-1" style={{ color: "var(--accent)" }}>
+                                <Sparkles size={9} /> tailored to your playstyle
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ) : (
+                <p className="text-[12px] rounded-lg border px-4 py-3 mb-4"
+                   style={{ borderColor: "var(--signal)33", color: "var(--signal)" }}>
+                  Nothing measured here is costing you placements. At that point the gains are in
+                  positioning and combat reads, which end-of-game data can't see.
+                </p>
+              )}
+
+              <h3 className="display text-[13px] mb-2.5">Everything measured</h3>
+              <div className="space-y-2">
+                {data.leaks.map((leak) => <LeakCard key={leak.id} leak={leak} />)}
+              </div>
+            </>
+          )}
+
+          {view === "tags" && (
+            <div className="space-y-2">
+              {data.axes?.length > 0 && (
+                <div className="rounded-lg border p-4 space-y-3"
+                     style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
+                  {data.axes.map((a) => <AxisBar key={a.id} axis={a} />)}
+                  <p className="text-[10px] leading-snug pt-1" style={{ color: "var(--faint)" }}>
+                    Two axes rather than the four an in-game overlay shows: damage type and board
+                    role need per-unit combat data that match-v1 doesn't return, and deriving them
+                    from unit names would be a guess dressed as a measurement.
+                  </p>
+                </div>
+              )}
+              {data.tags?.map((t) => (
+                <div key={t.id} className="rounded-lg border px-4 py-3 flex items-start gap-3 flex-wrap"
+                     style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
+                  <span className="text-[12px] rounded-full border px-2.5 py-1 shrink-0"
+                        style={{ color: TONE[t.tone] || "var(--dim)",
+                                 borderColor: `color-mix(in srgb, ${TONE[t.tone] || "var(--dim)"} 45%, transparent)` }}>
+                    {t.label}
+                  </span>
+                  <span className="text-[12.5px] flex-1 min-w-[200px]">{t.detail}</span>
+                  <span className="text-[10.5px] italic shrink-0" style={{ color: "var(--faint)" }}>
+                    {t.criteria}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {view === "games" && (
+            <div className="space-y-1.5">
+              {data.recent.map((g, i) => (
+                <div key={i} className="rounded-lg border px-3 py-2.5 flex items-start gap-3 flex-wrap"
                      style={{ background: "var(--surface)", borderColor: "var(--line)",
-                              borderLeftWidth: 2, borderLeftColor: cfg.color }}>
-                  <div className="flex items-start gap-3">
-                    <Icon size={15} style={{ color: cfg.color }} className="mt-[2px] shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline justify-between gap-3 flex-wrap">
-                        <span className="display text-[13px]">{leak.title}</span>
-                        <span className="mono text-[11.5px] shrink-0" style={{ color: cfg.color }}>
-                          {leak.metric}
-                        </span>
-                      </div>
-                      <p className="text-[12px] mt-1 leading-relaxed" style={{ color: "var(--dim)" }}>
-                        {leak.detail}
-                      </p>
+                              borderLeftWidth: 2,
+                              borderLeftColor: g.placement === 1 ? "var(--accent)"
+                                             : g.placement <= 4 ? "var(--signal)" : "var(--line)" }}>
+                  <div className="w-[104px] shrink-0">
+                    <p className="mono text-[19px] leading-none"
+                       style={{ color: g.placement <= 4 ? "var(--signal)" : "var(--dim)" }}>
+                      {g.placement}
+                      <span className="text-[10px] ml-1" style={{ color: "var(--faint)" }}>
+                        {["st","nd","rd"][g.placement - 1] || "th"}
+                      </span>
+                    </p>
+                    <p className="text-[11px] mt-1 truncate" title={g.comp}>{g.comp}</p>
+                    <p className="mono text-[10px] mt-0.5" style={{ color: "var(--faint)" }}>
+                      {timeAgo(g.played_at)}
+                    </p>
+                  </div>
 
-                      {leak.table && (
-                        <div className="mt-2.5 space-y-1">
-                          {leak.table.map((r) => (
-                            <div key={r.comp} className="flex items-center justify-between gap-3 text-[11px]">
-                              <span className="truncate">{r.comp}
-                                <span className="mono ml-1.5" style={{ color: "var(--faint)" }}>{r.games}g</span>
-                              </span>
-                              <span className="mono shrink-0" style={{ color: "var(--dim)" }}>
-                                {r.your_avg} vs {r.field_avg}
-                                <span className="ml-2" style={{ color: r.gap > 0 ? "var(--danger)" : "var(--signal)" }}>
-                                  {r.gap > 0 ? "+" : ""}{r.gap}
-                                </span>
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {leak.examples?.length > 0 && (
-                        <div className="mt-2.5 flex flex-wrap gap-1.5">
-                          {leak.examples.map((ex, i) => (
-                            <span key={i} className="mono text-[10px] rounded px-2 py-1 border"
-                                  style={{ borderColor: "var(--line)", color: "var(--dim)" }}>
-                              {ex.comp ? `${ex.comp} · ${ex.augment} ${ex.lift > 0 ? "+" : ""}${ex.lift}`
-                                       : `${ex.gold}g left · placed ${ex.placement}`}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {leak.caveat && (
-                        <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--faint)" }}>
-                          {leak.caveat}
-                        </p>
-                      )}
+                  <div className="w-[92px] shrink-0 mono text-[10.5px] leading-relaxed"
+                       style={{ color: "var(--dim)" }}>
+                    <div>lv {g.level}</div>
+                    <div>{g.gold}g left</div>
+                    <div title="Gold-equivalent value of the board you finished with">
+                      {num(g.board_value)} board
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
 
-          <button onClick={() => setShowGames((v) => !v)}
-                  className="flex items-center gap-1.5 text-[11.5px] mt-4 mb-2" style={{ color: "var(--dim)" }}>
-            <ChevronDown size={13} className={showGames ? "rotate-180 transition-transform" : "transition-transform"} />
-            {data.recent.length} games behind this
-          </button>
-          {showGames && (
-            <div className="space-y-[3px]">
-              {data.recent.map((g, i) => (
-                <div key={i} className="flex items-center gap-3 text-[11px] rounded border px-3 py-2"
-                     style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
-                  <span className="mono text-[14px] w-5 shrink-0"
-                        style={{ color: g.placement <= 4 ? "var(--signal)" : "var(--dim)" }}>
-                    {g.placement}
-                  </span>
-                  <span className="w-36 shrink-0 truncate">{g.comp}</span>
-                  <span className="mono shrink-0" style={{ color: "var(--dim)" }}>
-                    lv{g.level} · r{g.round} · {g.gold}g
-                  </span>
-                  <span className="truncate" style={{ color: "var(--faint)" }}>{g.augments.join(" · ")}</span>
+                  <div className="flex-1 min-w-[260px]">
+                    <div className="flex flex-wrap gap-1 mb-1.5">
+                      {g.traits?.map((t) => (
+                        <TraitBadge key={t.name} name={t.name} units={t.units}
+                                    meta={traitMeta[t.name]} showName={false} size={17} />
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {g.units?.map((u, j) => <BoardUnit key={j} unit={u} />)}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
           )}
 
           <p className="text-[10px] mt-5 leading-relaxed" style={{ color: "var(--faint)" }}>
-            Post-game analysis of your own match history. Riot's TFT policy encourages this; it
-            does not permit looking up opponents during a game, which this deliberately can't do.
+            Post-game analysis of your own match history, compared against {data.compared_against}.
+            Riot's TFT policy encourages this; it does not permit looking up opponents during a
+            game, which this deliberately can't do.
           </p>
         </>
       )}

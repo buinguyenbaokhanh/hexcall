@@ -108,6 +108,19 @@ def stats(slice_id: str):
     return _served(data)
 
 
+@app.get("/api/trends/<slice_id>")
+def trends(slice_id: str):
+    """Day-bucketed history for one slice. Separate from the stats payload
+    because it's an order of magnitude larger and only the Trends tab reads
+    it -- the place-change deltas the tier lists need ship inside the slice."""
+    if not slice_id.replace("-", "").isalnum():
+        return jsonify({"error": "bad slice id"}), 400
+    data = _load(f"trends-{slice_id}")
+    if not data:
+        return jsonify({"error": f"no trends published for '{slice_id}'"}), 404
+    return _served(data)
+
+
 @app.get("/api/item-meta")
 def item_meta():
     """Item tooltip content -- description, stats, crafting recipe. Set

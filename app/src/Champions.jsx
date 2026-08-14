@@ -1,31 +1,24 @@
 import React, { useMemo, useState } from "react";
-import { Search, ChevronDown, ChevronUp } from "lucide-react";
+import { Search } from "lucide-react";
 import { ChampionIcon, ItemIcon } from "./icons.jsx";
 import { assignTiers, TierBadge } from "./tiers.jsx";
 import { StatGrid } from "./stats.jsx";
 import { TraitChip } from "./TraitBadge.jsx";
+import {
+  PageHeader, FilterChips, StatTable, Place, PlaceChange, Frequency, pct, COST_COLORS,
+} from "./table.jsx";
 
 const ROLE_ORDER = ["Carry", "Fighter", "Tank", "Caster", "Reaper", "Specialist"];
 const ROLE_COLORS = {
   Carry: "#FF7043", Fighter: "#FFCA3A", Tank: "#C98B5E",
   Caster: "#B57BEE", Reaper: "#F472B6", Specialist: "#38BDF8",
 };
-// TFT's own cost-tier colours -- players read gold/purple/blue/green/grey as
-// 5/4/3/2/1 cost straight from the shop, so reusing that needs no legend.
-const COST_COLORS = { 1: "#9FB0C4", 2: "#3FBF6F", 3: "#4FA3F7", 4: "#B571F0", 5: "#F0B429" };
-
-const SORTS = {
-  placement: { label: "Placement", fn: (a, b) => a.avg_placement - b.avg_placement },
-  playrate: { label: "Play rate", fn: (a, b) => (b.play_rate || 0) - (a.play_rate || 0) },
-  cost: { label: "Cost", fn: (a, b) => (a.cost ?? 9) - (b.cost ?? 9) },
-  name: { label: "Name", fn: (a, b) => a.name.localeCompare(b.name) },
-};
 
 function CostBadge({ cost }) {
   if (!cost) return null;
   const color = COST_COLORS[cost];
   return (
-    <span className="mono text-[11px] font-bold px-1.5 py-[1px] rounded shrink-0"
+    <span className="mono text-[10.5px] font-bold px-1.5 py-[1px] rounded shrink-0"
           style={{ color, background: `color-mix(in srgb, ${color} 16%, transparent)` }}>
       {cost}g
     </span>
@@ -90,7 +83,29 @@ function ComponentPriority({ build, itemMeta }) {
 }
 
 /**
- * Champion roster.
+ * The individual items most often seen on a unit, regardless of what they were
+ * paired with.
+ *
+ * The pipeline measures item *sets* -- the full three-slot build -- which is
+ * the right unit for "what should I build", but the wrong one for a glance
+ * down a tier list: a unit with its damage spread over four viable third items
+ * looks itemless when only whole sets are counted. Summing each item's
+ * appearances across every measured set recovers "this unit wants Blue Buff"
+ * without losing the set detail, which is still there on expand.
+ */
+function popularItems(builds, limit = 5) {
+  const counts = new Map();
+  for (const b of builds) {
+    b.items.forEach((id, i) => {
+      const prev = counts.get(id) || { id, name: b.names?.[i] || id, icon: b.icons?.[i], n: 0 };
+      counts.set(id, { ...prev, n: prev.n + b.n });
+    });
+  }
+  return [...counts.values()].sort((a, b) => b.n - a.n).slice(0, limit);
+}
+
+/**
+ * Unit tier list.
  *
  * Rows come from the published champion catalogue (the live set's playable
  * roster) with measured stats joined on. Cost, role, traits, base stats and
@@ -102,7 +117,7 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
   const [roleFilter, setRoleFilter] = useState("all");
   const [costFilter, setCostFilter] = useState("all");
   const [query, setQuery] = useState("");
-  const [sortBy, setSortBy] = useState("placement");
+  const [sort, setSort] = useState({ key: "place", dir: "asc" });
   const [expanded, setExpanded] = useState(() => new Set());
 
   const { rows, measuredCount } = useMemo(() => {
@@ -114,6 +129,7 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
     for (const id of ids) {
       const meta = catalog[id] || {};
       const s = stats.champions?.[id];
+      const builds = stats.unit_items?.[id] || [];
       const row = {
         id,
         name: meta.name || stats.champion_names?.[id] || id,
@@ -123,8 +139,10 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
         traits: meta.traits || [],
         baseStats: meta.stats,
         ability: meta.ability,
-        builds: stats.unit_items?.[id] || [],
+        builds,
+        topItems: popularItems(builds),
         comps: stats.champion_comps?.[id] || [],
+        change: stats.place_change?.units?.[id],
         ...(s || {}),
         measured: Boolean(s),
       };
@@ -143,21 +161,82 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
       out = out.filter((r) =>
         r.name.toLowerCase().includes(q) || r.traits.some((t) => t.toLowerCase().includes(q)));
     }
-    return [...out].sort((a, b) => {
-      if (a.measured !== b.measured) return a.measured ? -1 : 1;
-      if (!a.measured) return (a.cost ?? 9) - (b.cost ?? 9) || a.name.localeCompare(b.name);
-      return SORTS[sortBy].fn(a, b);
-    });
-  }, [rows, roleFilter, costFilter, query, sortBy]);
+    return out;
+  }, [rows, roleFilter, costFilter, query]);
 
   const toggle = (id) =>
     setExpanded((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const chip = (active, color) => ({
-    borderColor: active ? color : "var(--line)",
-    background: active ? `color-mix(in srgb, ${color} 16%, transparent)` : "transparent",
-    color: active ? "var(--text)" : "var(--dim)",
-  });
+  const baseline = stats.baseline_placement;
+
+  const columns = useMemo(() => [
+    {
+      key: "unit", label: "Unit", sortFn: (a, b) => a.name.localeCompare(b.name),
+      cell: (c) => (
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="shrink-0 rounded-full p-[2px]"
+                style={{ border: `1.5px solid ${COST_COLORS[c.cost] || "var(--line)"}` }}>
+            <ChampionIcon src={c.icon} name={c.name} size={30} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[13px] font-medium truncate">{c.name}</span>
+              <CostBadge cost={c.cost} />
+              {c.role && (
+                <span className="text-[9.5px] px-1.5 py-[1px] rounded shrink-0"
+                      style={{ color: ROLE_COLORS[c.role],
+                               background: `color-mix(in srgb, ${ROLE_COLORS[c.role]} 16%, transparent)` }}>
+                  {c.role}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              {c.traits.map((t) => <TraitChip key={t} name={t} meta={traitMeta[t]} />)}
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "tier", label: "Tier", align: "center", width: 70,
+      sortFn: (a, b) => a.avg_placement - b.avg_placement,
+      cell: (c) => (c.measured ? <TierBadge tier={c.tier} size="sm" /> : null),
+    },
+    {
+      key: "place", label: "Avg Place", align: "right", width: 110,
+      sortFn: (a, b) => a.avg_placement - b.avg_placement,
+      cell: (c) => (c.measured
+        ? <Place value={c.avg_placement} baseline={baseline} />
+        : <span className="text-[10.5px]" style={{ color: "var(--faint)" }}>no games</span>),
+    },
+    {
+      key: "change", label: "Change", align: "right", width: 95, defaultDir: "asc",
+      sortFn: (a, b) => (a.change?.delta ?? 99) - (b.change?.delta ?? 99),
+      cell: (c) => <PlaceChange change={c.change} />,
+    },
+    {
+      key: "win", label: "Win Rate", align: "right", width: 100, defaultDir: "desc",
+      sortFn: (a, b) => (a.win_rate || 0) - (b.win_rate || 0),
+      cell: (c) => (c.measured
+        ? <span className="mono text-[12.5px]">{pct(c.win_rate)}</span>
+        : <span style={{ color: "var(--faint)" }}>—</span>),
+    },
+    {
+      key: "freq", label: "Frequency", align: "right", width: 130, defaultDir: "desc",
+      sortFn: (a, b) => (a.n || 0) - (b.n || 0),
+      cell: (c) => (c.measured ? <Frequency n={c.n} rate={c.play_rate} /> : null),
+    },
+    {
+      key: "items", label: "Popular Items", align: "right", width: 190,
+      cell: (c) => (
+        <span className="flex items-center gap-1 justify-end">
+          {c.topItems.map((it) => (
+            <ItemIcon key={it.id} src={it.icon} name={it.name} size={24} meta={itemMeta[it.id]} />
+          ))}
+        </span>
+      ),
+    },
+  ], [baseline, itemMeta, traitMeta]);
 
   if (rows.length === 0) {
     return (
@@ -169,244 +248,133 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
 
   return (
     <div>
-      <div className="flex items-end justify-between gap-4 flex-wrap mb-3">
-        <div>
-          <h2 className="display text-[15px] font-semibold">Champions</h2>
-          <p className="text-[11.5px] mt-0.5" style={{ color: "var(--dim)" }}>
-            {rows.length} in the set · {measuredCount} with enough games to rank in this slice
-          </p>
+      <PageHeader
+        title="TFT Unit Tier List"
+        blurb="Every unit in the set, ranked by measured average placement. Open a row for its best item builds, the components those need, and the comps it gets played in."
+        sampleSize={stats.sample_size} generatedAt={stats.generated_at}>
+        <p className="text-[11px] mt-1" style={{ color: "var(--faint)" }}>
+          {rows.length} in the set · {measuredCount} with enough games to rank in this slice
+        </p>
+      </PageHeader>
+
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <FilterChips
+            label="role" value={roleFilter} onChange={setRoleFilter}
+            options={[["all", "All"], ...ROLE_ORDER.map((r) => [r, r, ROLE_COLORS[r]])]} />
+          <FilterChips
+            label="cost" value={costFilter} onChange={setCostFilter}
+            options={[["all", "All"], ...[1, 2, 3, 4, 5].map((c) => [c, `${c}g`, COST_COLORS[c]])]} />
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search size={12} className="absolute left-2.5 top-[10px]" style={{ color: "var(--dim)" }} />
-            <input value={query} onChange={(e) => setQuery(e.target.value)}
-                   placeholder="Search name or trait"
-                   className="rounded pl-7 pr-2 py-2 text-[12px] border outline-none focus:border-[var(--accent)] transition-colors w-52"
-                   style={{ background: "var(--surface)", borderColor: "var(--line)", color: "var(--text)" }} />
-          </div>
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
-                  className="text-[12px] rounded px-2 py-2 border outline-none"
-                  style={{ background: "var(--surface)", borderColor: "var(--line)", color: "var(--text)" }}>
-            {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>Sort: {v.label}</option>)}
-          </select>
+        <div className="relative shrink-0">
+          <Search size={12} className="absolute left-2.5 top-[9px]" style={{ color: "var(--dim)" }} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)}
+                 placeholder="Search name or trait"
+                 className="rounded pl-7 pr-2 py-1.5 text-[12px] border outline-none focus:border-[var(--accent)] transition-colors w-52"
+                 style={{ background: "var(--surface)", borderColor: "var(--line)", color: "var(--text)" }} />
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-        <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--faint)" }}>role</span>
-        <button onClick={() => setRoleFilter("all")}
-                className="text-[12px] font-medium px-3 py-1.5 rounded-full border transition-colors"
-                style={chip(roleFilter === "all", "var(--text)")}>
-          All
-        </button>
-        {ROLE_ORDER.map((r) => (
-          <button key={r} onClick={() => setRoleFilter(r)}
-                  className="flex items-center gap-1.5 text-[12px] font-medium px-3 py-1.5 rounded-full border transition-colors"
-                  style={chip(roleFilter === r, ROLE_COLORS[r])}>
-            <span className="w-2 h-2 rounded-full" style={{ background: ROLE_COLORS[r] }} />
-            {r}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-1.5 mb-4 flex-wrap">
-        <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--faint)" }}>cost</span>
-        <button onClick={() => setCostFilter("all")}
-                className="text-[11.5px] px-2.5 py-1 rounded-full border transition-colors"
-                style={chip(costFilter === "all", "var(--text)")}>
-          All
-        </button>
-        {[1, 2, 3, 4, 5].map((c) => (
-          <button key={c} onClick={() => setCostFilter(c)}
-                  className="mono text-[11.5px] font-bold px-2.5 py-1 rounded-full border transition-colors"
-                  style={chip(costFilter === c, COST_COLORS[c])}>
-            <span style={{ color: costFilter === c ? COST_COLORS[c] : "var(--dim)" }}>{c}g</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="space-y-1.5">
-        {filtered.map((c) => {
-          const isOpen = expanded.has(c.id);
-          const best = c.builds[0];
-          return (
-            <div key={c.id} className="rounded-lg border overflow-hidden"
-                 style={{ background: "var(--surface)", borderColor: "var(--line)",
-                          opacity: c.measured ? 1 : 0.72 }}>
-              <button onClick={() => toggle(c.id)}
-                      className="w-full text-left px-3 py-2.5 flex items-center gap-3 row-hover">
-                {c.measured ? <TierBadge tier={c.tier} /> : <span className="w-7 h-7 shrink-0" />}
-                <span className="shrink-0 rounded-full p-[2px]"
-                      style={{ border: `1.5px solid ${COST_COLORS[c.cost] || "var(--line)"}` }}>
-                  <ChampionIcon src={c.icon} name={c.name} size={34} />
-                </span>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline justify-between gap-2 mb-0.5">
-                    <span className="flex items-center gap-2 min-w-0">
-                      <span className="text-[13.5px] font-medium truncate">{c.name}</span>
-                      <CostBadge cost={c.cost} />
-                      {c.role && (
-                        <span className="text-[10px] px-1.5 py-[1px] rounded shrink-0"
-                              style={{ color: ROLE_COLORS[c.role],
-                                       background: `color-mix(in srgb, ${ROLE_COLORS[c.role]} 16%, transparent)` }}>
-                          {c.role}
-                        </span>
-                      )}
-                    </span>
-                    {c.measured ? (
-                      <span className="mono text-[17px] font-bold shrink-0"
-                            style={{ color: c.avg_placement < stats.baseline_placement ? "var(--signal)" : "var(--text)" }}>
-                        {c.avg_placement.toFixed(2)}
-                      </span>
-                    ) : (
-                      <span className="text-[10.5px] shrink-0" style={{ color: "var(--faint)" }}>
-                        no games this slice
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex items-center gap-2.5 min-w-0 flex-wrap">
-                      {c.traits.map((t) => (
-                        <TraitChip key={t} name={t} meta={traitMeta[t]} />
-                      ))}
-                    </span>
-                    {c.measured && (
-                      <span className="mono text-[10.5px] shrink-0" style={{ color: "var(--dim)" }}>
-                        {(c.top4_rate * 100).toFixed(0)}% top4 · {(c.play_rate * 100).toFixed(1)}% played · n={c.n.toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {isOpen
-                  ? <ChevronUp size={14} className="shrink-0" style={{ color: "var(--faint)" }} />
-                  : <ChevronDown size={14} className="shrink-0" style={{ color: "var(--faint)" }} />}
-              </button>
-
-              {/* Collapsed: just the best build, the one thing you usually want */}
-              {!isOpen && best && (
-                <div className="px-3 pb-2.5 pl-[84px] flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-wider shrink-0" style={{ color: "var(--faint)" }}>
-                    best items
-                  </span>
-                  <span className="flex items-center gap-1">
-                    {best.items.map((id, i) => (
-                      <ItemIcon key={i} src={best.icons?.[i]} name={best.names?.[i] || id} size={22}
-                                meta={itemMeta[id]} />
+      <StatTable
+        columns={columns} rows={filtered} rowKey={(c) => c.id}
+        sort={sort} onSortChange={setSort}
+        expanded={expanded} onToggleRow={toggle}
+        pinLast={(c) => !c.measured}
+        renderDetail={(c) => (
+          <div className="space-y-3.5 pt-2">
+            {/* Recommended items first -- the question people open a unit to
+                answer. */}
+            {c.builds.length > 0 ? (
+              <>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                    recommended items <span className="normal-case tracking-normal">· best first</span>
+                  </p>
+                  <div className="space-y-1.5 max-w-2xl">
+                    {c.builds.slice(0, 5).map((b, i) => (
+                      <BuildRow key={i} build={b} itemMeta={itemMeta}
+                                baseline={baseline} best={i === 0} />
                     ))}
-                  </span>
-                  <span className="mono text-[11px]" style={{ color: "var(--dim)" }}>
-                    {best.avg_placement.toFixed(2)}
-                  </span>
+                  </div>
                 </div>
-              )}
 
-              {isOpen && (
-                <div className="px-3 pb-3.5 pl-[84px] space-y-3.5">
-                  {/* Recommended items first -- the question people open a
-                      champion to answer. */}
-                  {c.builds.length > 0 ? (
-                    <>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
-                          recommended items <span className="normal-case tracking-normal">· best first</span>
-                        </p>
-                        <div className="space-y-1.5">
-                          {c.builds.slice(0, 5).map((b, i) => (
-                            <BuildRow key={i} build={b} itemMeta={itemMeta}
-                                      baseline={stats.baseline_placement} best={i === 0} />
-                          ))}
-                        </div>
-                      </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                    components to build it
+                  </p>
+                  <ComponentPriority build={c.builds[0]} itemMeta={itemMeta} />
+                  <p className="text-[10px] mt-1.5 leading-snug max-w-2xl" style={{ color: "var(--faint)" }}>
+                    What the top build consumes — prioritise these on carousel. Riot's match API
+                    returns one end-of-game snapshot with no round timeline, so the stage a
+                    component was actually picked up can't be measured.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <p className="text-[11.5px]" style={{ color: "var(--faint)" }}>
+                No repeated item set on this unit in this data cut.
+              </p>
+            )}
 
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
-                          components to build it
-                        </p>
-                        <ComponentPriority build={c.builds[0]} itemMeta={itemMeta} />
-                        <p className="text-[10px] mt-1.5 leading-snug" style={{ color: "var(--faint)" }}>
-                          What the top build consumes — prioritise these on carousel. Riot's match API
-                          returns one end-of-game snapshot with no round timeline, so the stage a
-                          component was actually picked up can't be measured.
-                        </p>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-[11.5px]" style={{ color: "var(--faint)" }}>
-                      No repeated item set on this unit in this data cut.
+            {c.baseStats && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                  base stats <span className="normal-case tracking-normal">(1★)</span>
+                </p>
+                <div className="max-w-2xl"><StatGrid stats={c.baseStats} /></div>
+              </div>
+            )}
+
+            {/* Which comps this unit actually gets played in */}
+            {c.comps?.length > 0 && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                  played in
+                </p>
+                <div className="space-y-1 max-w-2xl">
+                  {c.comps.map((cp) => (
+                    <div key={cp.comp} className="flex items-center gap-2.5 rounded border px-2.5 py-1.5"
+                         style={{ borderColor: "var(--line)" }}>
+                      <span className="text-[12px] truncate flex-1 min-w-0">
+                        {stats.comp_names?.[cp.comp] || cp.comp}
+                      </span>
+                      <span className="mono text-[10.5px] shrink-0" style={{ color: "var(--dim)" }}>
+                        {(cp.share * 100).toFixed(0)}% of boards
+                      </span>
+                      <span className="mono text-[12.5px] shrink-0 w-10 text-right"
+                            style={{ color: cp.avg_placement < baseline ? "var(--signal)" : "var(--text)" }}>
+                        {cp.avg_placement.toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {c.ability && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                  ability
+                </p>
+                <div className="flex items-start gap-2.5 max-w-2xl">
+                  {c.ability.icon && (
+                    <img src={c.ability.icon} alt="" loading="lazy"
+                         className="w-8 h-8 rounded border shrink-0"
+                         style={{ borderColor: "var(--line)" }}
+                         onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] font-medium mb-0.5">{c.ability.name}</p>
+                    <p className="text-[11.5px] leading-relaxed whitespace-pre-line"
+                       style={{ color: "var(--dim)" }}>
+                      {c.ability.description}
                     </p>
-                  )}
-
-                  {c.baseStats && (
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
-                        base stats <span className="normal-case tracking-normal">(1★)</span>
-                      </p>
-                      <StatGrid stats={c.baseStats} />
-                    </div>
-                  )}
-
-                  {/* Which comps this unit actually gets played in */}
-                  {c.comps?.length > 0 && (
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
-                        played in
-                      </p>
-                      <div className="space-y-1">
-                        {c.comps.map((cp) => (
-                          <div key={cp.comp} className="flex items-center gap-2.5 rounded border px-2.5 py-1.5"
-                               style={{ borderColor: "var(--line)" }}>
-                            <span className="text-[12px] truncate flex-1 min-w-0">
-                              {stats.comp_names?.[cp.comp] || cp.comp}
-                            </span>
-                            <span className="mono text-[10.5px] shrink-0" style={{ color: "var(--dim)" }}>
-                              {(cp.share * 100).toFixed(0)}% of boards
-                            </span>
-                            <span className="mono text-[12.5px] shrink-0 w-10 text-right"
-                                  style={{ color: cp.avg_placement < stats.baseline_placement ? "var(--signal)" : "var(--text)" }}>
-                              {cp.avg_placement.toFixed(2)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {c.ability && (
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
-                        ability
-                      </p>
-                      <div className="flex items-start gap-2.5">
-                        {c.ability.icon && (
-                          <img src={c.ability.icon} alt="" loading="lazy"
-                               className="w-8 h-8 rounded border shrink-0"
-                               style={{ borderColor: "var(--line)" }}
-                               onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                        )}
-                        <div className="min-w-0">
-                          <p className="text-[12.5px] font-medium mb-0.5">{c.ability.name}</p>
-                          <p className="text-[11.5px] leading-relaxed whitespace-pre-line"
-                             style={{ color: "var(--dim)" }}>
-                            {c.ability.description}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  </div>
                 </div>
-              )}
-            </div>
-          );
-        })}
-        {filtered.length === 0 && (
-          <p className="text-[12px] py-10 text-center" style={{ color: "var(--dim)" }}>
-            Nothing matches this filter.
-          </p>
-        )}
-      </div>
+              </div>
+            )}
+          </div>
+        )} />
     </div>
   );
 }

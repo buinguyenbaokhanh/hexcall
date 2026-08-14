@@ -44,6 +44,7 @@ from pathlib import Path
 from aggregate import build_stats, puuids_for_tiers
 from comp_detail import build_comp_details, slug
 from static_data import team_planner_codes, team_planner_code
+from trends import build_trends
 
 log = logging.getLogger("publish")
 
@@ -233,6 +234,10 @@ def build_slice(conn: sqlite3.Connection, slice_def: dict, patch: str | None,
         stats["champion_icons"] = {c: resolver.champion_portrait(c) for c in champ_ids}
         stats["item_names"] = {i: resolver.item(i) for i in item_ids}
         stats["item_icons"] = {i: resolver.item_icon(i) for i in item_ids}
+        # Trait display names. The Traits tab reads them from trait-meta, but
+        # the review runs server-side against the slice alone and would
+        # otherwise label a player's main trait "TFT17_DarkStar".
+        stats["trait_names"] = {t: resolver.trait(t) for t in stats["traits"]}
         for cid, builds in stats["unit_items"].items():
             for b in builds:
                 b["names"] = [resolver.item(i) for i in b["items"]]
@@ -370,6 +375,27 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
                         stats["comps"][sig]["team_code"] = code
             log.info("  %d comp detail docs for %s", len(details), sd["id"])
 
+        # Trends run over the same population as the slice but across patches,
+        # so they're built from the slice's filters minus the patch. The place
+        # change goes into the slice payload rather than the trend file: every
+        # tier list column wants it, and a table shouldn't have to fetch a
+        # 300 KB series to render one arrow.
+        trend_meta = None
+        try:
+            trends = build_trends(conn, tft_set=tft_set, platform=sd.get("platform"),
+                                  puuid_filter=filters.get("puuid_filter"))
+            trends["slice_id"] = sd["id"]
+            trends["slice_label"] = sd["label"]
+            stats["place_change"] = trends["change"]
+            stats["trend_window"] = trends.get("window_days")
+            if trends["days"]:
+                trend_meta = _write(out / f"trends-{sd['id']}.json", trends)
+                log.info("  trends for %s: %d days, %.1f KB gzipped",
+                         sd["id"], len(trends["days"]), trend_meta["gzip_bytes"] / 1024)
+        except Exception:
+            log.exception("trend build failed for %s; publishing without place change", sd["id"])
+            stats["place_change"] = {}
+
         meta = _write(out / f"{sd['id']}.json", stats)
         manifest["slices"].append({
             "id": sd["id"], "label": sd["label"],
@@ -378,6 +404,8 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
             "augments": len(stats["augments"]),
             "pairs": len(stats["augment_comp_pairs"]),
             "url": f"/data/{sd['id']}.json",
+            "trends_url": f"/data/trends-{sd['id']}.json" if trend_meta else None,
+            "trend_days": len(trends["days"]) if trend_meta else 0,
             **meta,
         })
         log.info("published %s: %d participants, %.1f KB gzipped",
