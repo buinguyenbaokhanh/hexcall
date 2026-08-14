@@ -245,12 +245,20 @@ def _rate_limited(client: str) -> int:
 @app.get("/api/review")
 def review():
     from riot_client import RiotTFTClient, PLATFORM_TO_REGION
-    from review import fetch_history, analyse
+    from review import fetch_history, analyse_all, RANKED_QUEUE
 
     riot_id = request.args.get("riot_id", "")
     platform = request.args.get("platform", "na1")
     slice_id = request.args.get("slice", "global-apex")
     count = min(int(request.args.get("count", 20)), 30)
+    # Queue tabs. "all" analyses every queue together; anything else is a queue
+    # id. Only the selected queue drives the summary and leaks -- the breakdown
+    # in the response covers everything fetched either way.
+    q_arg = request.args.get("queue", str(RANKED_QUEUE))
+    try:
+        queue = None if q_arg == "all" else int(q_arg)
+    except ValueError:
+        return jsonify({"error": f"bad queue '{q_arg}' -- use a queue id or 'all'"}), 400
 
     if "#" not in riot_id:
         return jsonify({"error": "riot_id must look like GameName#TAG"}), 400
@@ -282,11 +290,11 @@ def review():
     name, tag = riot_id.rsplit("#", 1)
     try:
         client = RiotTFTClient()
-        puuid, matches = fetch_history(client, platform, name, tag, count)
+        puuid, matches = fetch_history(client, platform, name, tag, count, queue=queue)
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 502
 
-    result = analyse(puuid, matches, stats)
+    result = analyse_all(puuid, matches, stats)
     result["generated_at"] = int(time.time())
     REVIEW_CACHE[key] = (time.time(), result)
     return _served(result, max_age=REVIEW_TTL)

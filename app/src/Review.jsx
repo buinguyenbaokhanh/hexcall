@@ -172,23 +172,31 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [view, setView] = useState("fixes");
+  const [queue, setQueue] = useState("1100");
 
   const run = async () => {
     if (!riotId.includes("#")) { setError("Enter your Riot ID as GameName#TAG"); return; }
     setLoading(true); setError(null);
     try {
       const r = await fetch(
-        `${apiBase}/review?riot_id=${encodeURIComponent(riotId)}&platform=${platform}&slice=${sliceId || "global-all"}`
+        `${apiBase}/review?riot_id=${encodeURIComponent(riotId)}&platform=${platform}`
+        + `&slice=${sliceId || "global-all"}`
       );
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      setData(j); setView("fixes");
+      setData(j);
+      setQueue(j.views?.["1100"] ? "1100" : Object.keys(j.views || {})[0] || "all");
     } catch (e) {
       setError(String(e.message || e)); setData(null);
     } finally { setLoading(false); }
   };
 
-  const s = data?.summary;
+  // Every queue's analysis arrives in one response, so switching tabs is a
+  // local lookup rather than another Riot round-trip -- which under a
+  // development key's rate limit took about a minute per tab.
+  const qview = data?.views?.[queue] || null;
+  const s = qview?.summary;
+
   const noKey = error && error.toLowerCase().includes("api key");
 
   // Unlike every other tab, this one can't run off published files: it queries
@@ -233,7 +241,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                   style={{ background: "var(--bg)", borderColor: "var(--line)", color: "var(--text)" }}>
             {PLATFORMS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
-          <button onClick={run} disabled={loading}
+          <button onClick={() => run()} disabled={loading}
                   className="display text-[12.5px] px-4 py-2 rounded flex items-center gap-1.5 disabled:opacity-50"
                   style={{ background: "var(--accent)", color: "var(--bg)" }}>
             {loading && <Loader2 size={12} className="animate-spin" />}
@@ -258,13 +266,62 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
         )}
       </div>
 
+      {/* Queue tabs. Rendered from the breakdown the server returns, so
+          limited-time modes appear on their own without a client-side list to
+          keep up to date. */}
+      {data?.queues?.length > 0 && (
+        <div className="flex items-center gap-1 flex-wrap mb-4 border-b pb-2"
+             style={{ borderColor: "var(--line)" }}>
+          {[{ id: "all", label: "All queues", games: data.examined },
+            ...data.queues.map((q) => ({ ...q, id: String(q.id) }))].map((q) => (
+            <button key={q.id} onClick={() => setQueue(q.id)}
+                    className="display text-[12.5px] px-3 py-1.5 rounded-t border-b-2 whitespace-nowrap transition-colors disabled:opacity-50"
+                    style={{
+                      borderColor: queue === q.id ? "var(--accent)" : "transparent",
+                      color: queue === q.id ? "var(--text)" : "var(--dim)",
+                    }}>
+              {q.label}
+              <span className="mono text-[10.5px] ml-1.5" style={{ color: "var(--faint)" }}>
+                {q.games}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* A queue with no games is a normal outcome once tabs exist, not an
+          error worth the red treatment. */}
+      {data?.error && !data?.views && (
+        <p className="text-[12px] rounded-lg border px-4 py-3 mb-4"
+           style={{ borderColor: "var(--line)", color: "var(--dim)" }}>
+          {data.error}
+        </p>
+      )}
+
       {s && (
         <>
+          {/* What the selected queue can and can't be measured against. The
+              published stats are built from ranked only, so "vs. the field" is
+              a ranked claim -- saying so beats quietly showing fewer cards. */}
+          {!qview.field_comparable && (
+            <div className="flex items-start gap-2 text-[11.5px] rounded px-3 py-2 border mb-4"
+                 style={{ color: "var(--dim)", borderColor: "var(--line)" }}>
+              <AlertCircle size={13} className="mt-[2px] shrink-0" />
+              <span>
+                {qview.queue_label} isn't compared against the tier list — the published stats
+                are built from ranked games only.{" "}
+                {qview.lobby_comparable
+                  ? "Checks that compare you against your own lobby still apply."
+                  : "Only checks that read your own boards apply here."}
+              </span>
+            </div>
+          )}
+
           {s.low_sample && (
             <div className="flex items-start gap-2 text-[11.5px] rounded px-3 py-2 border mb-4"
                  style={{ color: "var(--warn)", borderColor: "var(--warn)33", background: "color-mix(in srgb, var(--warn) 8%, transparent)" }}>
               <AlertTriangle size={13} className="mt-[2px] shrink-0" />
-              <span>Only {s.games} games found. Patterns below are suggestive, not conclusive.</span>
+              <span>Only {s.games} game{s.games === 1 ? "" : "s"} found. Patterns below are suggestive, not conclusive.</span>
             </div>
           )}
 
@@ -273,12 +330,15 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
               <span className="display text-[13px]">Your average placement</span>
               <span className="flex items-baseline gap-2">
                 <span className="mono text-[26px]"
-                      style={{ color: s.avg_placement < s.field_avg ? "var(--signal)" : "var(--danger)" }}>
+                      style={{ color: !qview.field_comparable ? "var(--text)"
+                                    : s.avg_placement < s.field_avg ? "var(--signal)" : "var(--danger)" }}>
                   {s.avg_placement.toFixed(2)}
                 </span>
-                <span className="mono text-[11px]" style={{ color: "var(--dim)" }}>
-                  field {s.field_avg.toFixed(2)}
-                </span>
+                {qview.field_comparable && (
+                  <span className="mono text-[11px]" style={{ color: "var(--dim)" }}>
+                    field {s.field_avg.toFixed(2)}
+                  </span>
+                )}
               </span>
             </div>
 
@@ -290,11 +350,15 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
             </div>
             <div className="relative h-6">
               <div className="absolute left-0 right-0 top-[11px] h-px" style={{ background: "var(--line)" }} />
-              <div className="absolute top-[4px] h-[15px] w-px" style={{ left: `${axisPct(s.field_avg)}%`, background: "var(--dim)" }} />
+              {qview.field_comparable && (
+                <div className="absolute top-[4px] h-[15px] w-px"
+                     style={{ left: `${axisPct(s.field_avg)}%`, background: "var(--dim)" }} />
+              )}
               <div className="absolute top-[4px] transition-all duration-500"
                    style={{ left: `${axisPct(s.avg_placement)}%`, transform: "translateX(-50%)" }}>
                 <div className="w-[15px] h-[15px] rotate-45 rounded-[3px]"
-                     style={{ background: s.avg_placement < s.field_avg ? "var(--signal)" : "var(--danger)" }} />
+                     style={{ background: !qview.field_comparable ? "var(--dim)"
+                                       : s.avg_placement < s.field_avg ? "var(--signal)" : "var(--danger)" }} />
               </div>
             </div>
 
@@ -331,9 +395,9 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
               ))}
             </div>
 
-            {data.tags?.length > 0 && (
+            {qview.tags?.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t" style={{ borderColor: "var(--line)" }}>
-                {data.tags.map((t) => (
+                {qview.tags.map((t) => (
                   <span key={t.id} title={`${t.detail} · ${t.criteria}`}
                         className="text-[11.5px] rounded-full border px-2.5 py-1"
                         style={{ color: TONE[t.tone] || "var(--dim)",
@@ -353,7 +417,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
 
           {view === "fixes" && (
             <>
-              {data.plan?.length > 0 ? (
+              {qview.plan?.length > 0 ? (
                 <div className="rounded-lg border p-4 mb-4"
                      style={{ background: "var(--surface)", borderColor: "var(--accent)33" }}>
                   <p className="display text-[13px] mb-0.5 flex items-center gap-1.5">
@@ -365,7 +429,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                     things to fix is a list of nothing to fix.
                   </p>
                   <ol className="space-y-2.5">
-                    {data.plan.map((p, i) => (
+                    {qview.plan.map((p, i) => (
                       <li key={p.leak} className="flex gap-3">
                         <span className="mono text-[13px] shrink-0" style={{ color: "var(--accent)" }}>{i + 1}</span>
                         <div className="min-w-0">
@@ -394,17 +458,17 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
 
               <h3 className="display text-[13px] mb-2.5">Everything measured</h3>
               <div className="space-y-2">
-                {data.leaks.map((leak) => <LeakCard key={leak.id} leak={leak} />)}
+                {qview.leaks.map((leak) => <LeakCard key={leak.id} leak={leak} />)}
               </div>
             </>
           )}
 
           {view === "tags" && (
             <div className="space-y-2">
-              {data.axes?.length > 0 && (
+              {qview.axes?.length > 0 && (
                 <div className="rounded-lg border p-4 space-y-3"
                      style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
-                  {data.axes.map((a) => <AxisBar key={a.id} axis={a} />)}
+                  {qview.axes.map((a) => <AxisBar key={a.id} axis={a} />)}
                   <p className="text-[10px] leading-snug pt-1" style={{ color: "var(--faint)" }}>
                     Two axes rather than the four an in-game overlay shows: damage type and board
                     role need per-unit combat data that match-v1 doesn't return, and deriving them
@@ -412,7 +476,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                   </p>
                 </div>
               )}
-              {data.tags?.map((t) => (
+              {qview.tags?.map((t) => (
                 <div key={t.id} className="rounded-lg border px-4 py-3 flex items-start gap-3 flex-wrap"
                      style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
                   <span className="text-[12px] rounded-full border px-2.5 py-1 shrink-0"
@@ -449,6 +513,11 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                     <p className="mono text-[10px] mt-0.5" style={{ color: "var(--faint)" }}>
                       {timeAgo(g.played_at)}
                     </p>
+                    {g.queue && (
+                      <p className="text-[10px] mt-0.5 truncate" style={{ color: "var(--dim)" }}>
+                        {g.queue}
+                      </p>
+                    )}
                   </div>
 
                   <div className="w-[92px] shrink-0 mono text-[10.5px] leading-relaxed"

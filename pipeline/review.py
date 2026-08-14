@@ -55,6 +55,55 @@ MIN_GAMES = 10                  # below this, say so rather than guess
 
 RANKED_QUEUE = 1100
 
+# Queue ids seen in the wild. Riot publishes no queue catalogue through the TFT
+# API, and new limited-time modes appear with ids nothing documents -- one real
+# account's history held 6100 and 6120, which match no published list. So this
+# is a display-name table only, and anything missing falls back to the
+# `tft_game_type` the match itself carries rather than rendering as a bare
+# number.
+QUEUE_NAMES = {
+    1090: "Normal",
+    1100: "Ranked",
+    1110: "Tutorial",
+    1130: "Hyper Roll",
+    1150: "Double Up",
+    1160: "Double Up",
+    1210: "Choncc's Treasure",
+    1220: "Tacticians Trials",
+}
+
+GAME_TYPE_NAMES = {
+    "standard": "Standard", "pairs": "Double Up",
+    "turbo": "Hyper Roll", "pve": "PvE", "tutorial": "Tutorial",
+}
+
+# Queues the published statistics can be compared against.
+#
+# aggregate.py builds every slice from queue 1100 only, so "vs. the field" is a
+# ranked claim and nothing else. Leaks that compare you against your OWN lobby
+# -- level, board value, upgrades -- stay valid in any 8-player standard queue,
+# because the comparison population is in the match. Double Up is excluded from
+# both: it is played in pairs, so a "lobby peer" is not an opponent playing the
+# same game you are.
+FIELD_COMPARABLE = {1100}
+
+# Lobby comparison is decided by the GAME TYPE, not by a queue id allowlist.
+# Any `standard` mode is eight solo players on a 1-8 placement scale, so "how
+# did my board compare with the players who went out when I did" means the same
+# thing in all of them -- including limited-time modes whose ids nothing
+# documents. An id list would silently deny those the checks they can support,
+# which is exactly what happened to queues 6100 and 6120.
+LOBBY_COMPARABLE_TYPES = {"standard", None}
+
+
+def queue_label(queue_id, game_type=None) -> str:
+    """Display name for a queue, falling back to its game type."""
+    if queue_id in QUEUE_NAMES:
+        return QUEUE_NAMES[queue_id]
+    if game_type in GAME_TYPE_NAMES:
+        return f"{GAME_TYPE_NAMES[game_type]} ({queue_id})"
+    return f"Queue {queue_id}"
+
 # How many recent matches to look through to find `count` ranked ones.
 #
 # match-v1 can't filter by queue, so the only way to know a match is ranked is
@@ -68,9 +117,15 @@ DEFAULT_LOOKBACK = 100
 
 
 def fetch_history(client, platform: str, game_name: str, tag_line: str,
-                  count: int = 20,
-                  lookback: int = DEFAULT_LOOKBACK) -> tuple[str, list[dict]]:
-    """Resolve a Riot ID and pull their `count` most recent RANKED matches.
+                  count: int = 20, lookback: int = DEFAULT_LOOKBACK,
+                  queue: int | None = RANKED_QUEUE) -> tuple[str, list[dict]]:
+    """Resolve a Riot ID and pull their recent matches.
+
+    Returns EVERY match fetched, not just the target queue. match-v1 can't
+    filter by queue, so a match's queue is only knowable by fetching it -- which
+    means the other queues have already been paid for by the time they're
+    identified, and discarding them would throw away the whole queue breakdown
+    for nothing. `queue` only decides when to stop early.
 
     The region is derived here rather than passed in: account-v1 and match-v1
     use different cluster sets, and every caller that passed one region for both
@@ -85,16 +140,21 @@ def fetch_history(client, platform: str, game_name: str, tag_line: str,
     puuid = acct["puuid"]
 
     ids = client.match_ids(platform, puuid, count=max(count, lookback)) or []
-    matches = []
-    for i, mid in enumerate(ids, 1):
+    matches, hits, examined = [], 0, 0
+    for mid in ids:
         m = client.match(platform, mid)
+        if not m:
+            continue
+        examined += 1
+        matches.append(m)
         # `None` keeps the synthetic fixtures in test_pipeline.py working, which
         # carry no queue_id.
-        if m and m.get("info", {}).get("queue_id") in (RANKED_QUEUE, None):
-            matches.append(m)
-            if len(matches) >= count:
+        q = m.get("info", {}).get("queue_id")
+        if queue is None or q in (queue, None):
+            hits += 1
+            if hits >= count:
                 break
-    log.info("%d ranked of %d matches examined", len(matches), min(i, len(ids)) if ids else 0)
+    log.info("%d matches examined, %d in the target queue", examined, hits)
     return puuid, matches
 
 
@@ -816,34 +876,120 @@ def improvement_plan(leaks: list[dict], tag_labels: dict[str, str]) -> list[dict
 
 # --- orchestration --------------------------------------------------------
 
-def analyse(puuid: str, matches: list[dict], stats: dict) -> dict:
-    games = []
+def _split(puuid: str, matches: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Flatten raw matches into this player's games, plus the queue breakdown."""
+    all_games = []
     for m in matches:
         me = _me(m, puuid)
         if not me:
             continue
-        games.append({
+        info = m.get("info", {})
+        q = info.get("queue_id")
+        all_games.append({
             "match_id": m.get("metadata", {}).get("match_id"),
             "puuid": puuid,
             "placement": me.get("placement"),
             "level": me.get("level", 0),
             "last_round": me.get("last_round"),
             "gold_left": me.get("gold_left"),
-            "played_at": m.get("info", {}).get("game_datetime"),
+            "played_at": info.get("game_datetime"),
+            "queue_id": q,
+            "queue": queue_label(q, info.get("tft_game_type")),
+            "game_type": info.get("tft_game_type"),
             "augments": [a for a in (me.get("augments") or []) if not is_legend_augment(a)],
             "sig": comp_signature(me),
             # The whole participant record, kept so the board diagnostics can
             # read units, items and traits without re-walking the match.
             "participant": me,
-            "lobby": m.get("info", {}).get("participants", []),
+            "lobby": info.get("participants", []),
         })
 
     # Newest first, which is the order Riot returns and the order the tags
     # assume when they compare consecutive games.
-    games.sort(key=lambda g: g.get("played_at") or 0, reverse=True)
+    all_games.sort(key=lambda g: g.get("played_at") or 0, reverse=True)
 
+    # Counts cover everything fetched, which is a window rather than the whole
+    # account -- labelled as such by the client so "3 Double Up" doesn't read as
+    # a lifetime total.
+    queue_counts = Counter((g["queue_id"], g["queue"], g["game_type"]) for g in all_games)
+    queues = [{"id": qid, "label": label, "games": n, "game_type": gt,
+               "field_comparable": qid in FIELD_COMPARABLE,
+               "lobby_comparable": gt in LOBBY_COMPARABLE_TYPES}
+              for (qid, label, gt), n in sorted(queue_counts.items(), key=lambda kv: -kv[1])]
+
+    return all_games, queues
+
+
+def analyse(puuid: str, matches: list[dict], stats: dict,
+            queue: int | None = RANKED_QUEUE) -> dict:
+    """Summarise and diagnose one player's history for a single queue.
+
+    Kept for the CLI and for callers that want one queue. The web endpoint uses
+    analyse_all, which returns every queue from the same fetch.
+    """
+    all_games, queues = _split(puuid, matches)
+
+    if queue is None:
+        # "All queues" cannot mean literally all of them. Placement doesn't
+        # carry the same meaning across game types: Tacticians Trials is a
+        # one-player PvE mode where placement is always 1, so averaging it in
+        # silently improves your record, and Double Up is scored in pairs.
+        # Aggregating only `standard` keeps the 1-8 scale meaning one thing,
+        # and uses the game type the match reports rather than an id list that
+        # would miss every new limited-time mode.
+        games = [g for g in all_games if g["game_type"] in ("standard", None)]
+    else:
+        games = [g for g in all_games if g["queue_id"] in (queue, None)]
+
+    view = _queue_view(games, stats, queue)
+    if view is None:
+        label = queue_label(queue) if queue is not None else "any standard"
+        return {"error": f"no {label} games found in this account's recent history",
+                "queues": queues, "examined": len(all_games)}
+
+    return {
+        **view,
+        "recent": _recent(all_games, stats),
+        "patch": stats.get("patch"),
+        "compared_against": stats.get("slice_label", "published stats"),
+        "queues": queues,
+        "examined": len(all_games),
+    }
+
+
+def analyse_all(puuid: str, matches: list[dict], stats: dict) -> dict:
+    """Every queue's view from a single fetch.
+
+    Tabs re-analysing on click meant a fresh Riot round-trip per tab -- about a
+    minute each under a development key's rate limit, for data already sitting
+    in memory. The matches are fetched once; slicing them by queue is pure
+    arithmetic, so all views are computed together and the client switches
+    between them without touching the network.
+    """
+    all_games, queues = _split(puuid, matches)
+    views = {}
+    std = [g for g in all_games if g["game_type"] in ("standard", None)]
+    v = _queue_view(std, stats, None)
+    if v:
+        views["all"] = v
+    for q in {g["queue_id"] for g in all_games}:
+        v = _queue_view([g for g in all_games if g["queue_id"] in (q, None)], stats, q)
+        if v:
+            views[str(q)] = v
+    return {
+        "views": views,
+        "recent": _recent(all_games, stats),
+        "patch": stats.get("patch"),
+        "compared_against": stats.get("slice_label", "published stats"),
+        "queues": queues,
+        "examined": len(all_games),
+    }
+
+
+def _queue_view(games: list[dict], stats: dict, queue: int | None) -> dict | None:
+    """Summary, leaks, tags and plan for one queue's games."""
     if not games:
-        return {"error": "no ranked games found for this account"}
+        return None
 
     placements = [g["placement"] for g in games]
     summary = {
@@ -856,16 +1002,35 @@ def analyse(puuid: str, matches: list[dict], stats: dict) -> dict:
         "low_sample": len(games) < MIN_GAMES,
     }
 
-    detectors = [
-        leak_itemisation(games, stats),
-        leak_board_strength(games),
-        leak_augment_fit(games, stats),
-        leak_comp_skill_gap(games, stats),
-        leak_contested(games, stats),
-        leak_star_tempo(games),
+    # Which comparisons the selected queue actually supports. Running the
+    # field-relative detectors on Double Up would compare a paired game against
+    # a ranked solo tier list and report the mismatch as the player's mistake.
+    # "vs. the field" is a ranked claim and only a ranked claim, so the
+    # aggregate view never makes it -- it spans normals and limited-time modes
+    # the tier list was not built from. Lobby-relative checks still hold there,
+    # because the comparison population is inside each match.
+    field_ok = queue in FIELD_COMPARABLE
+    lobby_ok = games[0]["game_type"] in LOBBY_COMPARABLE_TYPES
+
+    detectors = []
+    if field_ok:
+        detectors += [
+            leak_itemisation(games, stats),
+            leak_augment_fit(games, stats),
+            leak_comp_skill_gap(games, stats),
+        ]
+    if lobby_ok:
+        detectors += [
+            leak_board_strength(games),
+            leak_contested(games, stats),
+            leak_star_tempo(games),
+            leak_level_tempo(games),
+        ]
+    # Self-referential: these read only your own boards, so they hold in any
+    # queue that has placements at all.
+    detectors += [
         leak_gold_hoarding(games),
         leak_empty_slots(games),
-        leak_level_tempo(games),
         leak_comp_flexibility(games, stats),
         leak_exit_timing(games),
     ]
@@ -882,38 +1047,45 @@ def analyse(puuid: str, matches: list[dict], stats: dict) -> dict:
         "tags": tags,
         "axes": playstyle_axes(games),
         "plan": improvement_plan(leaks, names),
-        "recent": [
-            {"placement": g["placement"], "comp": comp_label(g["sig"], stats),
-             "level": g["level"], "round": g["last_round"], "gold": g["gold_left"],
-             "played_at": g["played_at"],
-             "board_value": round(board_value(g["participant"])),
-             "eliminations": g["participant"].get("players_eliminated"),
-             "damage": g["participant"].get("total_damage_to_players"),
-             "augments": [stats["augment_names"].get(a, a) for a in g["augments"]],
-             "traits": [
-                 {"name": t["name"], "units": t.get("num_units", 0), "style": t.get("style", 0)}
-                 for t in sorted(g["participant"].get("traits", []),
-                                 key=lambda t: (-t.get("style", 0), -t.get("num_units", 0)))
-                 if t.get("tier_current", 0) > 0
-             ][:6],
-             "units": [
-                 {"id": u.get("character_id"),
-                  "name": stats.get("champion_names", {}).get(u.get("character_id"), u.get("character_id")),
-                  "icon": stats.get("champion_icons", {}).get(u.get("character_id")),
-                  "cost": RARITY_COST.get(u.get("rarity")),
-                  "star": u.get("tier"),
-                  "items": [stats.get("item_names", {}).get(i, i) for i in (u.get("itemNames") or [])],
-                  "item_icons": [stats.get("item_icons", {}).get(i) for i in (u.get("itemNames") or [])]}
-                 for u in sorted(g["participant"].get("units", []),
-                                 key=lambda u: -(RARITY_COST.get(u.get("rarity")) or 0))
-                 if RARITY_COST.get(u.get("rarity")) is not None
-             ],
-            }
-            for g in games
-        ],
-        "patch": stats.get("patch"),
-        "compared_against": stats.get("slice_label", "published stats"),
+        "queue": queue,
+        "queue_label": games[0]["queue"] if queue is not None else "All 8-player queues",
+        "field_comparable": field_ok,
+        "lobby_comparable": lobby_ok,
     }
+
+
+def _recent(all_games: list[dict], stats: dict) -> list[dict]:
+    """Every fetched game, tagged with its queue so the client can tab locally."""
+    return [
+        {"placement": g["placement"], "comp": comp_label(g["sig"], stats),
+         "queue": g["queue"], "queue_id": g["queue_id"],
+         "level": g["level"], "round": g["last_round"], "gold": g["gold_left"],
+         "played_at": g["played_at"],
+         "board_value": round(board_value(g["participant"])),
+         "eliminations": g["participant"].get("players_eliminated"),
+         "damage": g["participant"].get("total_damage_to_players"),
+         "augments": [stats["augment_names"].get(a, a) for a in g["augments"]],
+         "traits": [
+             {"name": t["name"], "units": t.get("num_units", 0), "style": t.get("style", 0)}
+             for t in sorted(g["participant"].get("traits", []),
+                             key=lambda t: (-t.get("style", 0), -t.get("num_units", 0)))
+             if t.get("tier_current", 0) > 0
+         ][:6],
+         "units": [
+             {"id": u.get("character_id"),
+              "name": stats.get("champion_names", {}).get(u.get("character_id"), u.get("character_id")),
+              "icon": stats.get("champion_icons", {}).get(u.get("character_id")),
+              "cost": RARITY_COST.get(u.get("rarity")),
+              "star": u.get("tier"),
+              "items": [stats.get("item_names", {}).get(i, i) for i in (u.get("itemNames") or [])],
+              "item_icons": [stats.get("item_icons", {}).get(i) for i in (u.get("itemNames") or [])]}
+             for u in sorted(g["participant"].get("units", []),
+                             key=lambda u: -(RARITY_COST.get(u.get("rarity")) or 0))
+             if RARITY_COST.get(u.get("rarity")) is not None
+         ],
+        }
+        for g in all_games
+    ]
 
 
 def main() -> None:
