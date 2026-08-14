@@ -82,25 +82,65 @@ BOARD_UNITS = 10
 _PATCH_RE = re.compile(r"(\d+)\.(\d+)")
 
 
-def current_patch(conn: sqlite3.Connection) -> str | None:
-    """The NEWEST patch present in the store, e.g. '16.16'.
+# Matches a patch needs before the build switches to it.
+#
+# Measured against the store rather than picked: a comp needs
+# MIN_SAMPLES_COMP (200) boards to be published at all, and comps clear that
+# floor roughly linearly with sample. On this data 4,000 participants yields 2
+# comps, 5,300 yields 4, and 7,900 yields 9 -- so a tier list only becomes worth
+# reading somewhere near 8,000 participants, which is about 1,200 matches at the
+# ~6.7 ranked boards per match the crawl actually stores.
+#
+# The failure this prevents is specific: a fresh patch clears
+# MIN_SAMPLE_TO_PUBLISH (a slice-level check) long before it can support a comp
+# list, so the slice publishes successfully with three comps in it.
+MIN_PATCH_MATCHES = 1200
 
-    Newest rather than most-sampled on purpose. A store that spans a patch
-    boundary holds more matches from the OLD patch for a day or two after it
-    flips -- picking by volume would keep publishing a tier list for a patch
-    nobody is playing any more. The cost is a thin sample immediately after a
-    patch lands, which publish() logs so it's visible rather than silent.
-    """
-    best = None
-    for (gv,) in conn.execute(
-            "SELECT DISTINCT game_version FROM matches WHERE game_version IS NOT NULL"):
+
+def patch_counts(conn: sqlite3.Connection) -> dict[tuple[int, int], int]:
+    """{(major, minor): matches} across the whole store."""
+    counts: dict[tuple[int, int], int] = {}
+    for gv, n in conn.execute(
+            "SELECT game_version, COUNT(*) FROM matches "
+            "WHERE game_version IS NOT NULL GROUP BY game_version"):
         m = _PATCH_RE.search(gv)
         if not m:
             continue
         key = (int(m.group(1)), int(m.group(2)))
-        if best is None or key > best:
-            best = key
-    return f"{best[0]}.{best[1]}" if best else None
+        counts[key] = counts.get(key, 0) + n
+    return counts
+
+
+def current_patch(conn: sqlite3.Connection,
+                  min_matches: int = MIN_PATCH_MATCHES) -> str | None:
+    """The newest patch that holds enough matches to publish a usable build.
+
+    Newest rather than most-sampled, but gated on sample. Un-gated "newest"
+    switches the moment the first game on a new patch is crawled, and for the
+    day or two that follows the build is technically current and practically
+    useless -- the last flip published three comps where the previous patch
+    supported twenty-three.
+
+    Blending the two patches instead is not an option: measured across this
+    store, 24 of 61 units moved by more than noise between 16.15 and 16.16, and
+    a blend put 23 of 63 units in the wrong tier -- including calling the
+    patch's biggest winner a B when it was an S. The error is small on average
+    and lands almost entirely on the units a patch actually changed, which are
+    exactly the ones a tier list exists to report.
+
+    So: publish the previous patch, correctly labelled, until the new one can
+    stand on its own. If nothing clears the floor -- a fresh store, or the first
+    crawl of a new set -- fall back to the best-sampled patch so the build
+    produces something rather than refusing.
+    """
+    counts = patch_counts(conn)
+    if not counts:
+        return None
+    for key in sorted(counts, reverse=True):
+        if counts[key] >= min_matches:
+            return f"{key[0]}.{key[1]}"
+    best = max(counts, key=lambda k: (counts[k], k))
+    return f"{best[0]}.{best[1]}"
 
 
 def patch_filter(patch: str) -> str:
@@ -274,15 +314,28 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
             comp_names: dict | None = None, keep_builds: int = 5,
             patch: str | None = None) -> Path:
     conn = sqlite3.connect(db_path)
+    forced = patch is not None
     patch = patch or current_patch(conn)
     if patch:
-        # Right after a patch flips, the newest patch can hold very few games.
-        # Log the split so a thin build is obvious instead of quietly shipping.
+        # Which patch was chosen and why. A build silently one patch behind is
+        # the kind of thing you only notice after acting on it, so the newer
+        # patch and how close it is to taking over are logged every run.
+        counts = patch_counts(conn)
         n_patch = conn.execute("SELECT COUNT(*) FROM matches WHERE game_version LIKE ?",
                                (patch_filter(patch),)).fetchone()[0]
         n_all = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
-        log.info("building for patch %s: %d of %d stored matches (%.0f%%)",
-                 patch, n_patch, n_all, 100 * n_patch / max(n_all, 1))
+        log.info("building for patch %s%s: %d of %d stored matches (%.0f%%)",
+                 patch, " (forced)" if forced else "",
+                 n_patch, n_all, 100 * n_patch / max(n_all, 1))
+
+        newest = max(counts, default=None)
+        if newest and f"{newest[0]}.{newest[1]}" != patch:
+            have = counts[newest]
+            log.warning(
+                "patch %d.%d is newer but has only %d matches (need %d) -- holding on %s. "
+                "%d more matches to switch.",
+                newest[0], newest[1], have, MIN_PATCH_MATCHES, patch,
+                MIN_PATCH_MATCHES - have)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     out = BUILD_DIR / stamp
     out.mkdir(parents=True, exist_ok=True)
