@@ -198,7 +198,7 @@ function CompDetail({ comp, stats, traitMeta, itemMeta, onOpenComp, apiBase, sta
                 </div>
               ))}
             </div>
-            <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--faint)" }}>
+            <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--muted)" }}>
               Where players finished, not when they levelled. The match API has no round
               timeline, so stage-by-stage levelling and early-board win rates can't be measured
               from it.
@@ -223,7 +223,7 @@ function CompDetail({ comp, stats, traitMeta, itemMeta, onOpenComp, apiBase, sta
                     <span className="text-[12px] flex-1 min-w-0 truncate text-left">
                       {stats.comp_names?.[r.comp] || r.comp}
                     </span>
-                    <span className="mono text-[10.5px] shrink-0" style={{ color: "var(--faint)" }}>
+                    <span className="mono text-[10.5px] shrink-0" style={{ color: "var(--muted)" }}>
                       {r.games} shared lobbies
                     </span>
                     <span className="mono text-[13px] font-bold w-12 text-right shrink-0"
@@ -234,7 +234,7 @@ function CompDetail({ comp, stats, traitMeta, itemMeta, onOpenComp, apiBase, sta
                 );
               })}
             </div>
-            <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--faint)" }}>
+            <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--muted)" }}>
               How often this comp finished ahead when both were in the same lobby. Unlike
               comparing two averages, these boards faced the same eight players.
             </p>
@@ -333,7 +333,7 @@ export default function Comps({ stats, traitMeta, itemMeta, onOpenComp, apiBase,
       </div>
 
       <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-        <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--faint)" }}>tier</span>
+        <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--muted)" }}>tier</span>
         <button onClick={() => setTierFilter("all")}
                 className="text-[11.5px] px-2.5 py-1 rounded-full border transition-colors"
                 style={chip(tierFilter === "all", "var(--text)")}>
@@ -351,7 +351,7 @@ export default function Comps({ stats, traitMeta, itemMeta, onOpenComp, apiBase,
 
       {styles.length > 1 && (
         <div className="flex items-center gap-1.5 mb-4 flex-wrap">
-          <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--faint)" }}>plays like</span>
+          <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--muted)" }}>plays like</span>
           <button onClick={() => setStyleFilter("all")}
                   className="text-[11.5px] px-2.5 py-1 rounded-full border transition-colors"
                   style={chip(styleFilter === "all", "var(--text)")}>All</button>
@@ -432,7 +432,7 @@ export default function Comps({ stats, traitMeta, itemMeta, onOpenComp, apiBase,
                   <span>{(c.top4_rate * 100).toFixed(0)}% top4</span>
                   <span>{(c.win_rate * 100).toFixed(1)}% first</span>
                   <span>n={c.n.toLocaleString()}</span>
-                  {c.stderr && <span style={{ color: "var(--faint)" }}>±{(c.stderr * 1.96).toFixed(2)}</span>}
+                  {c.stderr && <span style={{ color: "var(--muted)" }}>±{(c.stderr * 1.96).toFixed(2)}</span>}
                 </div>
               </div>
             </div>

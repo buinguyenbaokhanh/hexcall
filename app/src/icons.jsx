@@ -16,7 +16,10 @@ export function ChampionIcon({ src, name, size = 24, className = "" }) {
     return (
       <div
         className={`shrink-0 rounded-full flex items-center justify-center font-semibold select-none ${className}`}
-        style={{ width: size, height: size, background: "var(--faint)", color: "var(--dim)", fontSize: size * 0.42 }}
+        // --dim on --faint is 3.28:1, under the 4.5:1 this needs. The initial
+        // is the only identification a unit has whenever Data Dragon hasn't
+        // published its art yet, which is routine for the first days of a set.
+        style={{ width: size, height: size, background: "var(--faint)", color: "var(--text)", fontSize: size * 0.42 }}
         title={name}
       >
         {initial}
@@ -96,16 +99,16 @@ export function ItemIcon({ src, name, size = 20, className = "", meta = null }) 
 
           {meta.recipe?.length > 0 ? (
             <span className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--faint)" }}>combine</span>
+              <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--muted)" }}>combine</span>
               {meta.recipe.map((c, i) => (
                 <React.Fragment key={i}>
-                  {i > 0 && <span style={{ color: "var(--faint)" }}>+</span>}
+                  {i > 0 && <span style={{ color: "var(--muted)" }}>+</span>}
                   <MiniItemIcon src={c.icon} name={c.name} size={20} />
                 </React.Fragment>
               ))}
             </span>
           ) : meta.recipe && (
-            <span className="text-[10px] uppercase tracking-wider" style={{ color: "var(--faint)" }}>basic component</span>
+            <span className="text-[10px] uppercase tracking-wider" style={{ color: "var(--muted)" }}>basic component</span>
           )}
         </>
       }>

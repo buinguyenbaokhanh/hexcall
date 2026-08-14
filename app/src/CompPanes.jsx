@@ -150,7 +150,7 @@ export function ItemsPane({ view, itemMeta, baseline }) {
                   <span className="mono text-[12.5px] font-bold w-16 text-right shrink-0"
                         style={{ color: place(h.avg, baseline) }}>
                     {h.avg}
-                    <span className="text-[9.5px] ml-1" style={{ color: "var(--faint)" }}>
+                    <span className="text-[9.5px] ml-1" style={{ color: "var(--muted)" }}>
                       {h.avg - view.avg_placement >= 0 ? "+" : ""}{(h.avg - view.avg_placement).toFixed(2)}
                     </span>
                   </span>
@@ -211,7 +211,7 @@ export function TraitsPane({ view, traitMeta, baseline }) {
               </div>
             ))}
           </div>
-          <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--faint)" }}>
+          <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--muted)" }}>
             Placement at each breakpoint this comp actually reached — the gap between them is
             what going one unit deeper is worth.
           </p>
@@ -245,7 +245,7 @@ export function StatsPane({ view, comp, contested, baseline }) {
             </div>
           ))}
         </div>
-        <p className="text-[10px] leading-snug" style={{ color: "var(--faint)" }}>
+        <p className="text-[10px] leading-snug" style={{ color: "var(--muted)" }}>
           An average hides shape — a comp that wins or bottom-fours reads the same as one that
           always takes 4th.
         </p>
@@ -264,7 +264,7 @@ export function StatsPane({ view, comp, contested, baseline }) {
                      value={`${(c.pct * 100).toFixed(1)}%`} />
               ))}
             </div>
-            <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--faint)" }}>
+            <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--muted)" }}>
               How many other players in the same lobby ran this comp. Only measurable because
               placements are compared within a shared lobby.
             </p>
@@ -289,7 +289,7 @@ export function StatsPane({ view, comp, contested, baseline }) {
 
 function PaneTitle({ children }) {
   return (
-    <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+    <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>
       {children}
     </p>
   );

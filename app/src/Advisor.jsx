@@ -2,7 +2,6 @@ import React, { useMemo, useState } from "react";
 import { Search, X, Sparkles, Anchor, Shuffle, ArrowRight, Info, Check } from "lucide-react";
 import { AugmentIcon, ChampionIcon, ItemIcon, carryIdFromSig } from "./icons.jsx";
 import { HoverCard } from "./HoverCard.jsx";
-import { TraitBadge } from "./TraitBadge.jsx";
 import { rankComps, pivotAdvice, augmentTypes, fitScore } from "./fit.jsx";
 import { TeamCodeButton } from "./Comps.jsx";
 
@@ -180,7 +179,7 @@ export default function Advisor({ stats, augmentMeta, itemMeta, traitMeta, onOpe
                 <p className="mono text-[10px] mb-1" style={{ color: active ? "var(--accent)" : "var(--dim)" }}>{stage}</p>
                 <span className="flex justify-center items-center h-[26px]">
                   {id ? <AugmentIcon src={augmentMeta?.[id]?.icon} name={augmentMeta?.[id]?.name} size={26} />
-                      : <Sparkles size={14} style={{ color: "var(--faint)" }} />}
+                      : <Sparkles size={14} style={{ color: "var(--muted)" }} />}
                 </span>
               </button>
             );
@@ -344,7 +343,7 @@ function BuildPlan({ comp, itemMeta }) {
   const items = holder?.items || [];
   if (!items.length) {
     return (
-      <p className="mt-3 text-[11.5px]" style={{ color: "var(--faint)" }}>
+      <p className="mt-3 text-[11.5px]" style={{ color: "var(--muted)" }}>
         No item set has repeated often enough in this data cut to recommend a build yet.
       </p>
     );
@@ -363,7 +362,7 @@ function BuildPlan({ comp, itemMeta }) {
 
   return (
     <div className="mt-3 rounded-lg border p-3" style={{ borderColor: "var(--line)", background: "var(--bg)" }}>
-      <p className="text-[10px] uppercase tracking-wider mb-2" style={{ color: "var(--faint)" }}>
+      <p className="text-[10px] uppercase tracking-wider mb-2" style={{ color: "var(--muted)" }}>
         then build — on {holder.name}{holder.carry ? "" : " (the carry has no measured build yet)"}
       </p>
       <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
@@ -373,7 +372,7 @@ function BuildPlan({ comp, itemMeta }) {
       </div>
       {components.length > 0 && (
         <>
-          <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+          <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>
             components to prioritise
           </p>
           <div className="flex items-center gap-1.5 flex-wrap">

@@ -72,7 +72,7 @@ export function FilterChips({ label, options, value, onChange, counts }) {
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
       {label && (
-        <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--faint)" }}>
+        <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--muted)" }}>
           {label}
         </span>
       )}
@@ -115,7 +115,7 @@ export function SegmentedToggle({ options, value, onChange }) {
  * reads the same way wherever it appears.
  */
 export function Place({ value, baseline, size = 15 }) {
-  if (value == null) return <span style={{ color: "var(--faint)" }}>—</span>;
+  if (value == null) return <span style={{ color: "var(--muted)" }}>—</span>;
   return (
     <span className="mono font-bold" style={{
       fontSize: size,
@@ -139,7 +139,7 @@ const CHANGE_DEADBAND = 0.05;
  */
 export function PlaceChange({ change }) {
   if (!change || change.delta == null) {
-    return <span className="text-[11px]" style={{ color: "var(--faint)" }}>—</span>;
+    return <span className="text-[11px]" style={{ color: "var(--muted)" }}>—</span>;
   }
   const d = change.delta;
   const flat = Math.abs(d) < CHANGE_DEADBAND;
@@ -159,7 +159,7 @@ export function PlaceChange({ change }) {
  * 4,000-board slice is a very different claim from the same rate on 500,000.
  */
 export function Frequency({ n, rate }) {
-  if (n == null) return <span style={{ color: "var(--faint)" }}>—</span>;
+  if (n == null) return <span style={{ color: "var(--muted)" }}>—</span>;
   return (
     <span className="mono text-[12.5px] whitespace-nowrap">
       {num(n)}
@@ -247,7 +247,7 @@ export function StatTable({
                       col.sortFn ? "cursor-pointer" : "cursor-default"}`}
                     style={{ color: active ? "var(--text)" : "var(--dim)" }}>
                     {col.label}
-                    {Arrow && <Arrow size={11} style={{ color: active ? "var(--accent)" : "var(--faint)" }} />}
+                    {Arrow && <Arrow size={11} style={{ color: active ? "var(--accent)" : "var(--muted)" }} />}
                   </button>
                 </th>
               );

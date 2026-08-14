@@ -228,7 +228,7 @@ export default function Trends({ stats, apiBase, staticMode, sliceId, traitMeta 
         title="TFT Trends"
         blurb={`How each ${kind.replace(/s$/, "")} moved over the last ${data.days.length} days. Days are bucketed by when the match was played, not when it was crawled, and a day below the sample floor is left out rather than drawn.`}
         sampleSize={stats.sample_size} generatedAt={data.generated_at}>
-        <p className="text-[11px] mt-1" style={{ color: "var(--faint)" }}>
+        <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
           {first} → {last} · {num(Object.values(data.day_samples).reduce((a, b) => a + b, 0))} boards across the window
         </p>
       </PageHeader>
@@ -242,7 +242,7 @@ export default function Trends({ stats, apiBase, staticMode, sliceId, traitMeta 
       </div>
 
       <div className="rounded-lg border p-2" style={{ borderColor: "var(--line)", background: "var(--surface)" }}>
-        <p className="text-[10px] uppercase tracking-wider px-2 pt-1" style={{ color: "var(--faint)" }}>
+        <p className="text-[10px] uppercase tracking-wider px-2 pt-1" style={{ color: "var(--muted)" }}>
           {m.label} · better is {m.better === "low" ? "lower" : "higher"}, so up is better on this axis
         </p>
         <LineChart series={series} metric={metric} days={data.days}
@@ -269,7 +269,7 @@ export default function Trends({ stats, apiBase, staticMode, sliceId, traitMeta 
         ))}
       </div>
 
-      <p className="text-[10.5px] mt-4 leading-relaxed max-w-3xl" style={{ color: "var(--faint)" }}>
+      <p className="text-[10.5px] mt-4 leading-relaxed max-w-3xl" style={{ color: "var(--muted)" }}>
         The most recent day keeps filling as later crawls pull matches that were already
         played, so its point firms up over the following runs rather than being final when
         first drawn. Patch boundaries are marked because a line crossing one is comparing

@@ -30,7 +30,7 @@ function Section({ title, note, children }) {
         {title}
       </h4>
       {children}
-      {note && <p className="text-[10.5px] mt-2 leading-relaxed" style={{ color: "var(--faint)" }}>{note}</p>}
+      {note && <p className="text-[10.5px] mt-2 leading-relaxed" style={{ color: "var(--muted)" }}>{note}</p>}
     </section>
   );
 }
@@ -253,7 +253,7 @@ export default function CompBuild({
         ))}
       </div>
       {lens !== "base" && (
-        <p className="mono text-[11px] -mt-3 mb-4" style={{ color: "var(--faint)" }}>
+        <p className="mono text-[11px] -mt-3 mb-4" style={{ color: "var(--muted)" }}>
           filtered to boards holding this augment
         </p>
       )}
@@ -338,7 +338,7 @@ export default function CompBuild({
                   {Object.keys(u.stars).length > 1 && (
                     <div className="flex gap-2.5 mt-1 pl-[36px]">
                       {Object.entries(u.stars).map(([s, v]) => (
-                        <span key={s} className="mono text-[10.5px]" style={{ color: "var(--faint)" }}>
+                        <span key={s} className="mono text-[10.5px]" style={{ color: "var(--muted)" }}>
                           {s}★ {(v.pct * 100).toFixed(0)}% → <span style={{ color: placementColor(v.avg, baseline) }}>{v.avg}</span>
                         </span>
                       ))}
@@ -423,7 +423,7 @@ export default function CompBuild({
                       </div>
                       <span className="mono text-[13px] shrink-0" style={{ color: placementColor(b.avg, baseline) }}>
                         {b.avg}
-                        <span className="text-[10px] ml-1" style={{ color: "var(--faint)" }}>n={b.n}</span>
+                        <span className="text-[10px] ml-1" style={{ color: "var(--muted)" }}>n={b.n}</span>
                       </span>
                     </div>
                   ))}
@@ -494,7 +494,7 @@ export default function CompBuild({
       </div>
 
       <p className="text-[11px] mt-6 pt-4 border-t leading-relaxed flex items-start gap-2"
-         style={{ borderColor: "var(--line)", color: "var(--faint)" }}>
+         style={{ borderColor: "var(--line)", color: "var(--muted)" }}>
         <Info size={13} className="mt-[1px] shrink-0" />
         <span>
           No formation map: tft-match-v1 returns unit identities and items but no board

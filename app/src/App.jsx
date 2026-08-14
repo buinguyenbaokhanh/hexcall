@@ -172,6 +172,15 @@ export default function App() {
           --line:    #232936;
           --faint:   #2C3444;
           --ink-3:   #3D4658;
+          /* Secondary text. --faint (#2C3444) reads at 1.58:1 on --bg, well
+             under the 4.5:1 WCAG AA needs for body text, and it was carrying
+             real content -- sample sizes, section labels, every statistical
+             caveat. --faint stays for what it's actually suited to: bars,
+             fills and the scrollbar thumb, none of which are read. */
+          /* Sized against --raised, the lightest surface it sits on, so it
+             clears 4.5:1 everywhere rather than only on the page background:
+             5.10 on --bg, 4.77 on --surface, 4.51 on --raised. */
+          --muted:   #7282A4;
           --dim:     #78839A;
           --text:    #E4E8F0;
           --signal:  #46E0B0;
@@ -190,6 +199,15 @@ export default function App() {
         .scroll-thin::-webkit-scrollbar { width: 5px; height: 5px; }
         .scroll-thin::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 3px; }
         .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+        /* Keyboard focus. Inputs set outline-none for their own focus style,
+           which left every button and link with no visible focus at all --
+           tabbing through the app gave no indication of where you were.
+           :focus-visible keeps mouse clicks from drawing a ring. */
+        :focus-visible {
+          outline: 2px solid var(--accent);
+          outline-offset: 2px;
+          border-radius: 3px;
+        }
         .row-hover { transition: background 140ms ease, border-color 140ms ease; }
         .row-hover:hover { background: var(--raised); border-color: var(--ink-3); }
         @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
@@ -200,9 +218,12 @@ export default function App() {
               style={{ borderColor: "var(--line)", background: "color-mix(in srgb, var(--bg) 88%, transparent)" }}>
         <div className="max-w-[1180px] mx-auto px-6 h-[62px] flex items-center justify-between gap-4">
           <div className="flex items-baseline gap-3 min-w-0">
-            <span className="display text-[19px] font-bold tracking-tight">
+            {/* The page had no h1 at all -- the wordmark was a span, which
+                left screen readers and search engines with no document
+                heading. Styling is unchanged. */}
+            <h1 className="display text-[19px] font-bold tracking-tight">
               HEXCALL
-            </span>
+            </h1>
             <span className="text-[11px] mono truncate" style={{ color: "var(--dim)" }}>
               patch {stats.patch || "—"} · {stats.sample_size.toLocaleString()} boards · {timeAgo(stats.generated_at)}
               {status === "live" && <span style={{ color: "var(--signal)" }}> · live</span>}
@@ -251,7 +272,11 @@ export default function App() {
           </div>
         </div>
 
-        <div className="max-w-[1180px] mx-auto px-6 flex gap-1 -mb-px overflow-x-auto scroll-thin">
+        {/* Announced as a tab set rather than nine unrelated buttons: without
+            the roles a screen reader gives no sense of how many there are or
+            which one is showing. */}
+        <div role="tablist" aria-label="Sections"
+             className="max-w-[1180px] mx-auto px-6 flex gap-1 -mb-px overflow-x-auto scroll-thin">
           {[
             ["advisor", "Advisor", Sparkles],
             ["planner", "Items I hold", Layers],
@@ -264,19 +289,23 @@ export default function App() {
             ["review", "Review My Games", History],
           ].map(([id, label, Icon]) => (
             <button key={id} onClick={() => setTab(id)}
+                    role="tab" aria-selected={tab === id} id={`tab-${id}`}
                     className="display text-[13px] font-medium py-2.5 px-3 flex items-center gap-1.5 border-b-2 whitespace-nowrap transition-colors"
                     style={{
                       borderColor: tab === id ? "var(--accent)" : "transparent",
                       color: tab === id ? "var(--text)" : "var(--dim)",
                     }}>
-              <Icon size={13} style={{ color: tab === id ? "var(--accent)" : "var(--faint)" }} />
+              <Icon size={13} style={{ color: tab === id ? "var(--accent)" : "var(--muted)" }} />
               {label}
             </button>
           ))}
         </div>
       </header>
 
-      <main className="max-w-[1180px] mx-auto px-6 py-6">
+      {/* One panel that swaps content, so it points back at whichever tab is
+          selected rather than there being nine panels in the DOM. */}
+      <main role="tabpanel" aria-labelledby={`tab-${tab}`}
+            className="max-w-[1180px] mx-auto px-6 py-6">
         <StatusBanner status={status} error={error} onRetry={() => setSlice(sliceId)} />
 
         {tab === "advisor" && (
@@ -353,7 +382,7 @@ export default function App() {
               <ChampionIcon src={stats.champion_icons?.[carryIdFromSig(openCompLive.sig)]} name={openCompLive.name} size={44} />
               <div className="min-w-0 flex-1">
                 <h3 className="display text-[19px] truncate">{openCompLive.name}</h3>
-                <p className="mono text-[10px] mt-0.5 truncate" style={{ color: "var(--faint)" }}>{openCompLive.sig}</p>
+                <p className="mono text-[10px] mt-0.5 truncate" style={{ color: "var(--muted)" }}>{openCompLive.sig}</p>
               </div>
               <button onClick={() => setOpenComp(null)} className="shrink-0 p-1 rounded row-hover"
                       style={{ color: "var(--dim)" }} aria-label="Close">

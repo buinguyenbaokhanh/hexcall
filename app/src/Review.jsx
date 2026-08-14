@@ -39,7 +39,7 @@ function BoardUnit({ unit }) {
   const color = COST_COLORS[unit.cost] || "var(--line)";
   return (
     <span className="flex flex-col items-center gap-[3px] shrink-0" title={unit.name}>
-      <span className="mono text-[9px] leading-none" style={{ color: STAR_COLOR[unit.star] || "var(--faint)" }}>
+      <span className="mono text-[9px] leading-none" style={{ color: STAR_COLOR[unit.star] || "var(--muted)" }}>
         {"★".repeat(Math.min(unit.star || 1, 4))}
       </span>
       <span className="rounded-md p-[1.5px]" style={{ border: `1.5px solid ${color}` }}>
@@ -99,14 +99,14 @@ function LeakCard({ leak }) {
                       <ItemIcon key={j} src={src} name={b.yours[j]} size={20} />
                     ))}
                   </span>
-                  <span className="text-[11px]" style={{ color: "var(--faint)" }}>→</span>
+                  <span className="text-[11px]" style={{ color: "var(--muted)" }}>→</span>
                   <span className="flex items-center gap-1">
                     {(b.best_icons?.length ? b.best_icons : b.best).map((src, j) => (
                       <ItemIcon key={j} src={b.best_icons?.length ? src : null} name={b.best[j]} size={20} />
                     ))}
                   </span>
                   <span className="mono text-[11px] ml-auto shrink-0"
-                        style={{ color: b.gap == null ? "var(--faint)" : "var(--danger)" }}>
+                        style={{ color: b.gap == null ? "var(--muted)" : "var(--danger)" }}>
                     {b.gap == null ? "no measured sample" : `+${b.gap}`}
                   </span>
                 </div>
@@ -119,7 +119,7 @@ function LeakCard({ leak }) {
               {leak.table.map((r) => (
                 <div key={r.comp} className="flex items-center justify-between gap-3 text-[11px]">
                   <span className="truncate">{r.comp}
-                    <span className="mono ml-1.5" style={{ color: "var(--faint)" }}>{r.games}g</span>
+                    <span className="mono ml-1.5" style={{ color: "var(--muted)" }}>{r.games}g</span>
                   </span>
                   <span className="mono shrink-0" style={{ color: "var(--dim)" }}>
                     {r.your_avg} vs {r.field_avg}
@@ -145,7 +145,7 @@ function LeakCard({ leak }) {
           )}
 
           {leak.caveat && (
-            <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--faint)" }}>{leak.caveat}</p>
+            <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--muted)" }}>{leak.caveat}</p>
           )}
         </div>
       </div>
@@ -281,7 +281,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                       color: queue === q.id ? "var(--text)" : "var(--dim)",
                     }}>
               {q.label}
-              <span className="mono text-[10.5px] ml-1.5" style={{ color: "var(--faint)" }}>
+              <span className="mono text-[10.5px] ml-1.5" style={{ color: "var(--muted)" }}>
                 {q.games}
               </span>
             </button>
@@ -345,7 +345,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
             <div className="relative h-4 mb-1">
               {[1,2,3,4,5,6,7,8].map((t) => (
                 <span key={t} className="absolute mono text-[9.5px] -translate-x-1/2"
-                      style={{ left: `${axisPct(t)}%`, color: "var(--faint)" }}>{t}</span>
+                      style={{ left: `${axisPct(t)}%`, color: "var(--muted)" }}>{t}</span>
               ))}
             </div>
             <div className="relative h-6">
@@ -390,7 +390,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                 <div key={l}>
                   <p className="text-[9.5px] uppercase tracking-wider" style={{ color: "var(--dim)" }}>{l}</p>
                   <p className="mono text-[15px]">{v}</p>
-                  <p className="text-[9.5px]" style={{ color: "var(--faint)" }}>{sub}</p>
+                  <p className="text-[9.5px]" style={{ color: "var(--muted)" }}>{sub}</p>
                 </div>
               ))}
             </div>
@@ -424,7 +424,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                     <Target size={14} style={{ color: "var(--accent)" }} />
                     Change these, in this order
                   </p>
-                  <p className="text-[11px] mb-3" style={{ color: "var(--faint)" }}>
+                  <p className="text-[11px] mb-3" style={{ color: "var(--muted)" }}>
                     Ordered by what's costing you most. Three at a time — a list of eleven
                     things to fix is a list of nothing to fix.
                   </p>
@@ -435,7 +435,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                         <div className="min-w-0">
                           <p className="text-[12.5px] leading-relaxed">{p.do}</p>
                           <p className="text-[10.5px] mt-1 flex items-center gap-1.5 flex-wrap"
-                             style={{ color: "var(--faint)" }}>
+                             style={{ color: "var(--muted)" }}>
                             <span>{p.title} · {p.metric}</span>
                             {p.tailored && (
                               <span className="flex items-center gap-1" style={{ color: "var(--accent)" }}>
@@ -469,7 +469,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                 <div className="rounded-lg border p-4 space-y-3"
                      style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
                   {qview.axes.map((a) => <AxisBar key={a.id} axis={a} />)}
-                  <p className="text-[10px] leading-snug pt-1" style={{ color: "var(--faint)" }}>
+                  <p className="text-[10px] leading-snug pt-1" style={{ color: "var(--muted)" }}>
                     Two axes rather than the four an in-game overlay shows: damage type and board
                     role need per-unit combat data that match-v1 doesn't return, and deriving them
                     from unit names would be a guess dressed as a measurement.
@@ -485,7 +485,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                     {t.label}
                   </span>
                   <span className="text-[12.5px] flex-1 min-w-[200px]">{t.detail}</span>
-                  <span className="text-[10.5px] italic shrink-0" style={{ color: "var(--faint)" }}>
+                  <span className="text-[10.5px] italic shrink-0" style={{ color: "var(--muted)" }}>
                     {t.criteria}
                   </span>
                 </div>
@@ -505,12 +505,12 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                     <p className="mono text-[19px] leading-none"
                        style={{ color: g.placement <= 4 ? "var(--signal)" : "var(--dim)" }}>
                       {g.placement}
-                      <span className="text-[10px] ml-1" style={{ color: "var(--faint)" }}>
+                      <span className="text-[10px] ml-1" style={{ color: "var(--muted)" }}>
                         {["st","nd","rd"][g.placement - 1] || "th"}
                       </span>
                     </p>
                     <p className="text-[11px] mt-1 truncate" title={g.comp}>{g.comp}</p>
-                    <p className="mono text-[10px] mt-0.5" style={{ color: "var(--faint)" }}>
+                    <p className="mono text-[10px] mt-0.5" style={{ color: "var(--muted)" }}>
                       {timeAgo(g.played_at)}
                     </p>
                     {g.queue && (
@@ -545,7 +545,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
             </div>
           )}
 
-          <p className="text-[10px] mt-5 leading-relaxed" style={{ color: "var(--faint)" }}>
+          <p className="text-[10px] mt-5 leading-relaxed" style={{ color: "var(--muted)" }}>
             Post-game analysis of your own match history, compared against {data.compared_against}.
             Riot's TFT policy encourages this; it does not permit looking up opponents during a
             game, which this deliberately can't do.

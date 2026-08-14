@@ -178,7 +178,7 @@ export default function Traits({ stats, traitMeta, championMeta }) {
         title="TFT Trait Tier List"
         blurb="Which synergies are carrying boards on this patch. Overall weights every breakpoint by how often it was actually hit; by level splits them out, since the highlighted breakpoint is the one worth building toward."
         sampleSize={stats.sample_size} generatedAt={stats.generated_at}>
-        <p className="text-[11px] mt-1" style={{ color: "var(--faint)" }}>
+        <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
           {traits.length} synergies measured in this slice
         </p>
       </PageHeader>
@@ -212,7 +212,7 @@ export default function Traits({ stats, traitMeta, championMeta }) {
               )}
 
               <div>
-                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>
                   performance by breakpoint
                 </p>
                 <div className="space-y-1">
@@ -246,7 +246,7 @@ export default function Traits({ stats, traitMeta, championMeta }) {
 
               {t.champions.length > 0 && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                  <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>
                     champions with this trait
                   </p>
                   <div className="flex flex-wrap gap-2">

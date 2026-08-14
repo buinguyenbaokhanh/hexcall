@@ -2,7 +2,6 @@ import React, { useMemo, useState } from "react";
 import { Plus, Minus, ArrowRight, Sparkles, TrendingUp } from "lucide-react";
 import { ChampionIcon, ItemIcon, carryIdFromSig } from "./icons.jsx";
 import { HoverCard } from "./HoverCard.jsx";
-import { CONF } from "./scoring.jsx";
 
 /**
  * Which items each component builds into, derived by inverting the published
@@ -246,7 +245,7 @@ export default function Planner({ stats, itemMeta, onOpenComp }) {
                           {r.stat.avg_placement.toFixed(2)}
                         </span>
                       ) : (
-                        <span className="text-[10px] shrink-0" style={{ color: "var(--faint)" }}>no data</span>
+                        <span className="text-[10px] shrink-0" style={{ color: "var(--muted)" }}>no data</span>
                       )}
                     </HoverCard>
                   ))}
@@ -286,7 +285,7 @@ export default function Planner({ stats, itemMeta, onOpenComp }) {
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--faint)" }}>
+                <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--muted)" }}>
                   Best placement each unit reached holding one of your buildable items.
                 </p>
               </div>
@@ -333,7 +332,7 @@ export default function Planner({ stats, itemMeta, onOpenComp }) {
                          style={{ borderColor: "var(--line)" }}>
                       <ItemIcon src={g.icon} name={g.name} size={26} meta={itemMeta[g.id]} />
                       <span className="text-[12px] shrink-0" style={{ color: "var(--text)" }}>{g.name}</span>
-                      <ArrowRight size={12} className="shrink-0" style={{ color: "var(--faint)" }} />
+                      <ArrowRight size={12} className="shrink-0" style={{ color: "var(--muted)" }} />
                       <span className="flex items-center gap-1 flex-1 min-w-0 flex-wrap">
                         {g.unlocks.slice(0, 5).map((u) => (
                           <ItemIcon key={u.id} src={u.icon} name={u.name} size={20} meta={itemMeta[u.id]} />
@@ -345,7 +344,7 @@ export default function Planner({ stats, itemMeta, onOpenComp }) {
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--faint)" }}>
+                <p className="text-[10px] mt-2 leading-snug" style={{ color: "var(--muted)" }}>
                   Components that complete the strongest item you're one piece away from.
                 </p>
               </div>

@@ -39,7 +39,7 @@ function BuildRow({ build, itemMeta, baseline, best }) {
       </span>
       <span className="mono text-[12.5px] shrink-0" style={{ color: good ? "var(--signal)" : "var(--text)" }}>
         {build.avg_placement.toFixed(2)}
-        <span className="text-[10px] ml-1" style={{ color: "var(--faint)" }}>n={build.n}</span>
+        <span className="text-[10px] ml-1" style={{ color: "var(--muted)" }}>n={build.n}</span>
       </span>
     </div>
   );
@@ -207,7 +207,7 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
       sortFn: (a, b) => a.avg_placement - b.avg_placement,
       cell: (c) => (c.measured
         ? <Place value={c.avg_placement} baseline={baseline} />
-        : <span className="text-[10.5px]" style={{ color: "var(--faint)" }}>no games</span>),
+        : <span className="text-[10.5px]" style={{ color: "var(--muted)" }}>no games</span>),
     },
     {
       key: "change", label: "Change", align: "right", width: 95, defaultDir: "asc",
@@ -219,7 +219,7 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
       sortFn: (a, b) => (a.win_rate || 0) - (b.win_rate || 0),
       cell: (c) => (c.measured
         ? <span className="mono text-[12.5px]">{pct(c.win_rate)}</span>
-        : <span style={{ color: "var(--faint)" }}>—</span>),
+        : <span style={{ color: "var(--muted)" }}>—</span>),
     },
     {
       key: "freq", label: "Frequency", align: "right", width: 130, defaultDir: "desc",
@@ -252,7 +252,7 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
         title="TFT Unit Tier List"
         blurb="Every unit in the set, ranked by measured average placement. Open a row for its best item builds, the components those need, and the comps it gets played in."
         sampleSize={stats.sample_size} generatedAt={stats.generated_at}>
-        <p className="text-[11px] mt-1" style={{ color: "var(--faint)" }}>
+        <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
           {rows.length} in the set · {measuredCount} with enough games to rank in this slice
         </p>
       </PageHeader>
@@ -287,7 +287,7 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
             {c.builds.length > 0 ? (
               <>
                 <div>
-                  <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                  <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>
                     recommended items <span className="normal-case tracking-normal">· best first</span>
                   </p>
                   <div className="space-y-1.5 max-w-2xl">
@@ -299,11 +299,11 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
                 </div>
 
                 <div>
-                  <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                  <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>
                     components to build it
                   </p>
                   <ComponentPriority build={c.builds[0]} itemMeta={itemMeta} />
-                  <p className="text-[10px] mt-1.5 leading-snug max-w-2xl" style={{ color: "var(--faint)" }}>
+                  <p className="text-[10px] mt-1.5 leading-snug max-w-2xl" style={{ color: "var(--muted)" }}>
                     What the top build consumes — prioritise these on carousel. Riot's match API
                     returns one end-of-game snapshot with no round timeline, so the stage a
                     component was actually picked up can't be measured.
@@ -311,14 +311,14 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
                 </div>
               </>
             ) : (
-              <p className="text-[11.5px]" style={{ color: "var(--faint)" }}>
+              <p className="text-[11.5px]" style={{ color: "var(--muted)" }}>
                 No repeated item set on this unit in this data cut.
               </p>
             )}
 
             {c.baseStats && (
               <div>
-                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>
                   base stats <span className="normal-case tracking-normal">(1★)</span>
                 </p>
                 <div className="max-w-2xl"><StatGrid stats={c.baseStats} /></div>
@@ -328,7 +328,7 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
             {/* Which comps this unit actually gets played in */}
             {c.comps?.length > 0 && (
               <div>
-                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>
                   played in
                 </p>
                 <div className="space-y-1 max-w-2xl">
@@ -353,7 +353,7 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
 
             {c.ability && (
               <div>
-                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>
                   ability
                 </p>
                 <div className="flex items-start gap-2.5 max-w-2xl">

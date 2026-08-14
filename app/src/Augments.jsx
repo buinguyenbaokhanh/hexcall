@@ -157,7 +157,7 @@ export default function Augments({ augmentMeta, championMeta, traitMeta }) {
       </div>
 
       <div className="flex items-center gap-1.5 mb-4 flex-wrap">
-        <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--faint)" }}>rarity</span>
+        <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--muted)" }}>rarity</span>
         <button onClick={() => setRarityFilter("all")}
                 className="text-[12px] font-medium px-3 py-1.5 rounded-full border transition-colors"
                 style={chip(rarityFilter === "all", "var(--text)")}>
@@ -204,7 +204,7 @@ export default function Augments({ augmentMeta, championMeta, traitMeta }) {
                   {a.rarity ? (
                     <span className="text-[10px] uppercase tracking-wider"
                           style={{ color: RARITY[a.rarity] }}>{a.rarity}</span>
-                  ) : <span style={{ color: "var(--faint)" }}>—</span>}
+                  ) : <span style={{ color: "var(--muted)" }}>—</span>}
                 </td>
 
                 <td className="px-3 py-2">
@@ -247,7 +247,7 @@ export default function Augments({ augmentMeta, championMeta, traitMeta }) {
                     ))}
                     {a.variants?.length > 0 && (
                       <span className="flex items-center gap-1 flex-wrap">
-                        <span className="text-[9.5px] uppercase tracking-wider" style={{ color: "var(--faint)" }}>
+                        <span className="text-[9.5px] uppercase tracking-wider" style={{ color: "var(--muted)" }}>
                           also
                         </span>
                         {a.variants.map((vid) => (
@@ -260,7 +260,7 @@ export default function Augments({ augmentMeta, championMeta, traitMeta }) {
                       </span>
                     )}
                     {!a.refs?.champions?.length && !a.refs?.traits?.length && !a.variants?.length && (
-                      <span style={{ color: "var(--faint)" }}>—</span>
+                      <span style={{ color: "var(--muted)" }}>—</span>
                     )}
                   </span>
                 </td>

@@ -53,10 +53,10 @@ function ItemDetailCard({ it, itemMeta }) {
       )}
       {meta.recipe?.length > 0 && (
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--faint)" }}>combine</span>
+          <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--muted)" }}>combine</span>
           {meta.recipe.map((c, i) => (
             <React.Fragment key={i}>
-              {i > 0 && <span style={{ color: "var(--faint)" }}>+</span>}
+              {i > 0 && <span style={{ color: "var(--muted)" }}>+</span>}
               <ItemIcon src={c.icon} name={c.name} size={20} />
             </React.Fragment>
           ))}
@@ -191,7 +191,7 @@ export default function Items({ stats, itemMeta }) {
         title="TFT Items Tier List"
         blurb="Which items are worth building on this patch, ranked by the average placement of boards that finished holding them. Open a row for the item's effect and the units that hold it best."
         sampleSize={stats.sample_size} generatedAt={stats.generated_at}>
-        <p className="text-[11px] mt-1" style={{ color: "var(--faint)" }}>
+        <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
           {rows.length} items with enough games to rank in this slice
         </p>
       </PageHeader>
@@ -219,7 +219,7 @@ export default function Items({ stats, itemMeta }) {
 
             {it.holders.length > 0 ? (
               <div>
-                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
+                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>
                   best holders
                 </p>
                 <div className="space-y-1 max-w-2xl">
@@ -241,13 +241,13 @@ export default function Items({ stats, itemMeta }) {
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] mt-1.5 leading-snug max-w-2xl" style={{ color: "var(--faint)" }}>
+                <p className="text-[10px] mt-1.5 leading-snug max-w-2xl" style={{ color: "var(--muted)" }}>
                   Ranked by placement when this unit held the item. A unit that holds it rarely but
                   well can outrank the popular holder — check the sample.
                 </p>
               </div>
             ) : (
-              <p className="text-[11.5px]" style={{ color: "var(--faint)" }}>
+              <p className="text-[11.5px]" style={{ color: "var(--muted)" }}>
                 No single champion held this often enough to rank.
               </p>
             )}

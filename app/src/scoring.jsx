@@ -1,5 +1,4 @@
 import React from "react";
-import { ArrowUp, ArrowDown } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Scoring: projected = comp.avg + Σ shrink(lift(augment, comp))
@@ -14,23 +13,9 @@ export const shrink = (lift, n) => lift * (n / (n + SHRINKAGE_K));
 export const P_MIN = 1, P_MAX = 8;
 export const pct = (p) => ((p - P_MIN) / (P_MAX - P_MIN)) * 100;
 
-// The three augment slots, and the stage each is offered at.
-export const SLOTS = [
-  { slot: 0, stage: "2-1", label: "1st augment" },
-  { slot: 1, stage: "3-2", label: "2nd augment" },
-  { slot: 2, stage: "4-2", label: "3rd augment" },
-];
-
 export function buildIndex(stats) {
   const idx = new Map();
   for (const p of stats.augment_comp_pairs || []) idx.set(`${p.augment}|${p.comp}`, p);
-  return idx;
-}
-
-/** (augment, slot, comp) lifts — the same augment priced by when it was taken. */
-export function buildSlotIndex(stats) {
-  const idx = new Map();
-  for (const p of stats.augment_slot_pairs || []) idx.set(`${p.augment}|${p.slot}|${p.comp}`, p);
   return idx;
 }
 
@@ -146,7 +131,7 @@ export function AxisLegend({ className = "" }) {
     <div className={`relative h-4 ${className}`}>
       {[1, 2, 3, 4, 5, 6, 7, 8].map((t) => (
         <span key={t} className="absolute mono text-[9.5px] -translate-x-1/2"
-              style={{ left: `${pct(t)}%`, color: t === 4 || t === 5 ? "var(--dim)" : "var(--faint)" }}>
+              style={{ left: `${pct(t)}%`, color: t === 4 || t === 5 ? "var(--dim)" : "var(--muted)" }}>
           {t}
         </span>
       ))}
@@ -154,19 +139,3 @@ export function AxisLegend({ className = "" }) {
   );
 }
 
-export function RankBadge({ index, moved }) {
-  return (
-    <div className="relative w-9 shrink-0 text-center">
-      <span className="font-mono text-[19px] leading-none"
-            style={{ color: index === 0 ? "var(--accent)" : "var(--dim)" }}>
-        {index + 1}
-      </span>
-      {moved !== 0 && moved !== undefined && (
-        <span className="flex items-center justify-center gap-[1px] text-[9px] mt-0.5 font-mono"
-              style={{ color: moved > 0 ? "var(--signal)" : "var(--danger)" }}>
-          {moved > 0 ? <ArrowUp size={8} /> : <ArrowDown size={8} />}{Math.abs(moved)}
-        </span>
-      )}
-    </div>
-  );
-}

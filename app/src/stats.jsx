@@ -14,7 +14,7 @@ import React from "react";
  * of the surrounding palette, and they're used at large enough sizes and with
  * their label alongside that they don't carry meaning by colour alone.
  */
-export const STAT_COLORS = {
+const STAT_COLORS = {
   AD: "#FF7043",            // attack damage — orange-red
   AS: "#FFCA3A",            // attack speed — gold
   AP: "#B57BEE",            // ability power — purple
