@@ -61,6 +61,12 @@ SLICES = [
     {"id": "na1-apex",       "label": "NA Challenger + GM",      "platform": "na1", "tiers": ["CHALLENGER", "GRANDMASTER"]},
     {"id": "euw1-apex",      "label": "EUW Challenger + GM",     "platform": "euw1", "tiers": ["CHALLENGER", "GRANDMASTER"]},
     {"id": "kr-apex",        "label": "KR Challenger + GM",      "platform": "kr", "tiers": ["CHALLENGER", "GRANDMASTER"]},
+    # SEA. sg2 is the Singapore platform and routes to the `sea` match cluster,
+    # not `asia` -- see PLATFORM_TO_REGION. Crawl it with
+    # `./run-crawl.sh sg2 17`; until then these skip on sample like any other
+    # slice, which costs nothing.
+    {"id": "sg2-apex",       "label": "SEA Challenger + GM",     "platform": "sg2", "tiers": ["CHALLENGER", "GRANDMASTER"]},
+    {"id": "sg2-all",        "label": "SEA, all ranks",          "platform": "sg2", "tiers": None},
 ]
 
 MIN_SAMPLE_TO_PUBLISH = 4000  # participants; below this the slice is noise

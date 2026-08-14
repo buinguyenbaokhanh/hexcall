@@ -53,20 +53,48 @@ MIN_GAMES_FOR_COMP_VERDICT = 4
 MIN_GAMES = 10                  # below this, say so rather than guess
 
 
-def fetch_history(client, region: str, platform: str, game_name: str,
-                  tag_line: str, count: int = 20) -> tuple[str, list[dict]]:
-    """Resolve a Riot ID and pull their recent ranked matches."""
+RANKED_QUEUE = 1100
+
+# How many recent matches to look through to find `count` ranked ones.
+#
+# match-v1 can't filter by queue, so the only way to know a match is ranked is
+# to fetch it. Asking for exactly `count` ids and discarding the rest is what
+# this used to do, and for anyone who mixes queues it silently produced a tiny
+# sample -- a real account here returned 2 ranked games out of 20 fetched,
+# because only 27% of its recent matches were ranked (the rest Double Up,
+# Choncc's Treasure, normals). Over-fetching and stopping early costs nothing
+# for a ranked-only player and rescues the feature for everyone else.
+DEFAULT_LOOKBACK = 100
+
+
+def fetch_history(client, platform: str, game_name: str, tag_line: str,
+                  count: int = 20,
+                  lookback: int = DEFAULT_LOOKBACK) -> tuple[str, list[dict]]:
+    """Resolve a Riot ID and pull their `count` most recent RANKED matches.
+
+    The region is derived here rather than passed in: account-v1 and match-v1
+    use different cluster sets, and every caller that passed one region for both
+    silently broke SEA lookups. `platform` is the only thing a caller actually
+    knows, so it's the only thing this asks for.
+    """
+    from riot_client import account_region
+    region = account_region(platform)
     acct = client.account_by_riot_id(region, game_name, tag_line)
     if not acct:
         raise RuntimeError(f"No account found for {game_name}#{tag_line} in {region}")
     puuid = acct["puuid"]
 
-    ids = client.match_ids(platform, puuid, count=count) or []
+    ids = client.match_ids(platform, puuid, count=max(count, lookback)) or []
     matches = []
-    for mid in ids:
+    for i, mid in enumerate(ids, 1):
         m = client.match(platform, mid)
-        if m and m.get("info", {}).get("queue_id") in (1100, None):
+        # `None` keeps the synthetic fixtures in test_pipeline.py working, which
+        # carry no queue_id.
+        if m and m.get("info", {}).get("queue_id") in (RANKED_QUEUE, None):
             matches.append(m)
+            if len(matches) >= count:
+                break
+    log.info("%d ranked of %d matches examined", len(matches), min(i, len(ids)) if ids else 0)
     return puuid, matches
 
 
@@ -890,7 +918,7 @@ def analyse(puuid: str, matches: list[dict], stats: dict) -> dict:
 
 def main() -> None:
     import argparse
-    from riot_client import RiotTFTClient, PLATFORM_TO_REGION
+    from riot_client import RiotTFTClient
 
     ap = argparse.ArgumentParser(description="Review your own recent TFT games.")
     ap.add_argument("riot_id", help="GameName#TAG")
@@ -907,10 +935,9 @@ def main() -> None:
 
     stats = json.loads(Path(args.stats).read_text())
     client = RiotTFTClient()
-    region = PLATFORM_TO_REGION[args.platform]
 
     log.info("resolving %s#%s ...", name, tag)
-    puuid, matches = fetch_history(client, region, args.platform, name, tag, args.count)
+    puuid, matches = fetch_history(client, args.platform, name, tag, args.count)
     log.info("pulled %d ranked games", len(matches))
 
     result = analyse(puuid, matches, stats)

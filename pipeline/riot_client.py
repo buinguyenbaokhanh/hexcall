@@ -28,12 +28,35 @@ import requests
 
 log = logging.getLogger("riot")
 
+# Platform -> regional cluster for match-v1.
+#
+# The SEA and OCE platforms route to their own `sea` cluster, NOT to `asia`.
+# This is easy to get wrong and impossible to notice: asking `asia` for an sg2
+# player's matches returns HTTP 200 with an empty list, exactly as a player
+# with no games would. Verified against the live API -- for the same sg2
+# Challenger puuid, `asia` returns [] and `sea` returns their real match ids.
+#
+# Only kr and jp1 belong to `asia`. Getting this wrong silently produced zero
+# SEA matches while every request reported success.
 PLATFORM_TO_REGION = {
     "na1": "americas", "br1": "americas", "la1": "americas", "la2": "americas",
     "euw1": "europe", "eun1": "europe", "tr1": "europe", "ru": "europe",
-    "kr": "asia", "jp1": "asia", "oc1": "asia", "ph2": "asia", "sg2": "asia",
-    "th2": "asia", "tw2": "asia", "vn2": "asia",
+    "kr": "asia", "jp1": "asia",
+    "oc1": "sea", "ph2": "sea", "sg2": "sea", "th2": "sea", "tw2": "sea", "vn2": "sea",
 }
+
+
+def account_region(platform: str) -> str:
+    """Regional cluster for account-v1, which is NOT the same set as match-v1.
+
+    account-v1 only serves americas, europe and asia -- there is no `sea` host.
+    So the two APIs disagree for SEA and OCE platforms: an sg2 player's matches
+    live on `sea`, but the Riot ID that finds them resolves on `asia`. Passing
+    the match-v1 region straight through, which is the obvious thing to do and
+    what this code used to do, sends the lookup to a host that doesn't exist.
+    """
+    region = PLATFORM_TO_REGION[platform]
+    return "asia" if region == "sea" else region
 
 
 class RateLimiter:

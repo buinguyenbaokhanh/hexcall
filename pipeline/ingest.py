@@ -28,7 +28,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from riot_client import RiotTFTClient
+from riot_client import RiotTFTClient, PLATFORM_TO_REGION
 
 log = logging.getLogger("ingest")
 
@@ -110,9 +110,27 @@ def crawl(platform: str, tiers: list[str], players_per_tier: int,
     log.info("%d matches already stored", len(known))
 
     new_count = 0
+    empty_streak = 0
     for i, (puuid, tier, _lp) in enumerate(players, 1):
         ids = client.match_ids(platform, puuid, count=matches_per_player,
                                start_time=start_time) or []
+        # A wrong regional cluster returns HTTP 200 with an empty list, which is
+        # indistinguishable from a player who simply hasn't played. Ladder
+        # players have by definition played, so a run of empties in a row means
+        # the requests are going somewhere that has never heard of them --
+        # almost always PLATFORM_TO_REGION. Without this the crawl reports
+        # success and stores nothing.
+        if not ids:
+            empty_streak += 1
+            if empty_streak == 15:
+                log.error(
+                    "15 consecutive ladder players on %s returned no matches. "
+                    "These are ranked players, so they have games -- this is "
+                    "almost certainly the wrong regional cluster for %s "
+                    "(currently routing to '%s'). Check PLATFORM_TO_REGION.",
+                    platform, platform, PLATFORM_TO_REGION.get(platform, "?"))
+        else:
+            empty_streak = 0
         todo = [m for m in ids if m not in known]
         for mid in todo:
             m = client.match(platform, mid)

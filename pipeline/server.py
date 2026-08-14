@@ -282,8 +282,7 @@ def review():
     name, tag = riot_id.rsplit("#", 1)
     try:
         client = RiotTFTClient()
-        puuid, matches = fetch_history(
-            client, PLATFORM_TO_REGION[platform], platform, name, tag, count)
+        puuid, matches = fetch_history(client, platform, name, tag, count)
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 502
 
