@@ -339,10 +339,19 @@ def load_all(version: str | None = None, locale: str = "en_US") -> dict:
 def prettify_id(raw_id: str) -> str:
     """Fallback for IDs Data Dragon hasn't published yet.
     'TFT17_Augment_RichGetRicher' -> 'Rich Get Richer'
+
+    The prefix strip is case-insensitive because Riot does not emit ids
+    consistently: alongside 'TFT17_Akali' the match API returns
+    'tft17_bardfollower', which a case-sensitive pattern leaves untouched and
+    renders as 'tft17 bardfollower' in front of the user. All-lowercase words
+    are then capitalised, since the camelCase splitter has nothing to work with
+    on an id that never had any. Words that already carry capitals are left
+    alone -- title-casing them would turn 'LeBlanc' into 'Leblanc'.
     """
-    s = re.sub(r"^TFT\d*_?(Augment_|Item_)?", "", raw_id)
+    s = re.sub(r"^TFT\d*_?(Augment_|Item_)?", "", raw_id, flags=re.I)
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", s)
-    return s.replace("_", " ").strip()
+    s = s.replace("_", " ").strip()
+    return " ".join(w.capitalize() if w.islower() else w for w in s.split())
 
 
 class NameResolver:

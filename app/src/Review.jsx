@@ -34,20 +34,41 @@ function timeAgo(ms) {
   return d < 30 ? `${d}d ago` : `${Math.floor(d / 30)}mo ago`;
 }
 
-/** One unit on a finished board: star level, cost-tinted portrait, its items. */
+/**
+ * One unit on a finished board: star level, cost-tinted portrait, its items.
+ *
+ * Star level is the single most important thing about a unit -- a 3-star
+ * 1-cost beats a 1-star 4-cost in most fights -- and it was being drawn at 9px
+ * in a monospace font, smaller than the item icons underneath it. It now sits
+ * on the portrait the way the game does, at a size you can read across a row,
+ * with a dark backing so gold stars stay legible over bright splash art.
+ */
 function BoardUnit({ unit }) {
   const color = COST_COLORS[unit.cost] || "var(--line)";
+  const stars = Math.min(unit.star || 1, 4);
+  const label = `${unit.name}${unit.cost ? ` · ${unit.cost}-cost` : ""} · ${stars}★`;
   return (
-    <span className="flex flex-col items-center gap-[3px] shrink-0" title={unit.name}>
-      <span className="mono text-[9px] leading-none" style={{ color: STAR_COLOR[unit.star] || "var(--muted)" }}>
-        {"★".repeat(Math.min(unit.star || 1, 4))}
+    <span className="flex flex-col items-center gap-[3px] shrink-0" title={label}>
+      <span className="relative">
+        <span className="block rounded-md p-[1.5px]" style={{ border: `1.5px solid ${color}` }}>
+          <ChampionIcon src={unit.icon} name={unit.name} size={38} className="!rounded-md" />
+        </span>
+        {/* 1-star is the default state, so drawing a single star on every
+            unpaired unit is noise -- only upgrades are called out. */}
+        {stars > 1 && (
+          <span className="absolute -top-[7px] left-1/2 -translate-x-1/2 leading-none
+                           px-[3px] py-[1px] rounded-[3px] whitespace-nowrap"
+                style={{ fontSize: 11, letterSpacing: "-0.5px",
+                         color: STAR_COLOR[stars] || "var(--text)",
+                         background: "rgba(4,6,10,0.92)",
+                         border: "1px solid rgba(0,0,0,0.6)" }}>
+            {"★".repeat(stars)}
+          </span>
+        )}
       </span>
-      <span className="rounded-md p-[1.5px]" style={{ border: `1.5px solid ${color}` }}>
-        <ChampionIcon src={unit.icon} name={unit.name} size={30} className="!rounded-md" />
-      </span>
-      <span className="flex gap-[2px] h-[14px]">
+      <span className="flex gap-[2px] h-[15px]">
         {unit.item_icons?.map((src, i) => (
-          <ItemIcon key={i} src={src} name={unit.items?.[i]} size={13} />
+          <ItemIcon key={i} src={src} name={unit.items?.[i]} size={14} />
         ))}
       </span>
     </span>

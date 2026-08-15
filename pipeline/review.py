@@ -158,6 +158,71 @@ def fetch_history(client, platform: str, game_name: str, tag_line: str,
     return puuid, matches
 
 
+# Cross-set name and art resolution, built once and reused.
+#
+# The published slice only names the CURRENT set, because that is all a tier
+# list needs. A player's history is not so tidy: twenty ranked games reach back
+# months, and a Set 15 unit resolves to nothing, so its name falls through to
+# the raw id and the portrait falls back to the id's first letter -- rendering
+# a whole board as "T" for TFT15_*. On a real account 168 of 437 units came
+# back that way.
+#
+# NameResolver already handles this: champion_portrait() drops to the plain LoL
+# champion square for ids Data Dragon has no TFT art for, which is the same
+# character and always available. It was simply unreachable from here.
+_RESOLVER: object | None = None
+_RESOLVER_TRIED = False
+
+
+def _resolver():
+    """The shared NameResolver, or None if Data Dragon is unreachable.
+
+    Built on first use rather than at import: the server should start without
+    the network, and a review degrades to prettified ids rather than failing.
+    """
+    global _RESOLVER, _RESOLVER_TRIED
+    if not _RESOLVER_TRIED:
+        _RESOLVER_TRIED = True
+        try:
+            from static_data import load_all, NameResolver
+            _RESOLVER = NameResolver(load_all())
+        except Exception as e:  # noqa: BLE001
+            log.warning("Data Dragon unavailable (%s); older-set units will show "
+                        "prettified ids without art", e)
+            _RESOLVER = None
+    return _RESOLVER
+
+
+def champion_name(cid: str, stats: dict) -> str:
+    """Display name for a champion id from any set."""
+    named = (stats.get("champion_names") or {}).get(cid)
+    if named:
+        return named
+    r = _resolver()
+    if r:
+        try:
+            return r.champion(cid)
+        except Exception:  # noqa: BLE001
+            pass
+    from static_data import prettify_id
+    return prettify_id(cid)
+
+
+def champion_icon(cid: str, stats: dict) -> str | None:
+    """Portrait for a champion id from any set, or None if there is genuinely
+    no art -- summons and minions have none in any source."""
+    icon = (stats.get("champion_icons") or {}).get(cid)
+    if icon:
+        return icon
+    r = _resolver()
+    if r:
+        try:
+            return r.champion_portrait(cid)
+        except Exception:  # noqa: BLE001
+            pass
+    return None
+
+
 def comp_label(sig: str, stats: dict) -> str:
     """A readable name for a comp signature.
 
@@ -1073,8 +1138,8 @@ def _recent(all_games: list[dict], stats: dict) -> list[dict]:
          ][:6],
          "units": [
              {"id": u.get("character_id"),
-              "name": stats.get("champion_names", {}).get(u.get("character_id"), u.get("character_id")),
-              "icon": stats.get("champion_icons", {}).get(u.get("character_id")),
+              "name": champion_name(u.get("character_id"), stats),
+              "icon": champion_icon(u.get("character_id"), stats),
               "cost": RARITY_COST.get(u.get("rarity")),
               "star": u.get("tier"),
               "items": [stats.get("item_names", {}).get(i, i) for i in (u.get("itemNames") or [])],
