@@ -71,6 +71,21 @@ SLICES = [
 
 MIN_SAMPLE_TO_PUBLISH = 4000  # participants; below this the slice is noise
 
+# Comps a slice must actually produce before it is worth showing.
+#
+# The participant floor above is necessary but not sufficient: a comp needs
+# MIN_SAMPLES_COMP (200) boards of its own, so a slice can clear 4,000
+# participants and still resolve only two or three comps once they are spread
+# across a diverse meta. That has happened to every regional and apex slice
+# here -- sg2-all published 5,048 boards and 2 comps, global-apex 4,583 and 3.
+#
+# A two-row tier list is worse than no tab: it looks broken, and anyone acting
+# on it is reading a meta that does not exist. Five is the point where the list
+# covers the top of the meta rather than a fragment of it -- measured on this
+# store, that lands around 6,000 participants, so a slice held back here is
+# usually days rather than architecture away from returning.
+MIN_COMPS_TO_PUBLISH = 5
+
 # Units summarised onto each comp row in the slice payload. A TFT board caps at
 # 10ish, and the row only needs enough to be recognisable.
 BOARD_UNITS = 10
@@ -379,6 +394,14 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
         if stats["sample_size"] < MIN_SAMPLE_TO_PUBLISH:
             log.warning("skipping %s: only %d participants (need %d)",
                         sd["id"], stats["sample_size"], MIN_SAMPLE_TO_PUBLISH)
+            continue
+
+        if len(stats["comps"]) < MIN_COMPS_TO_PUBLISH:
+            log.warning("skipping %s: %d participants cleared the floor but only "
+                        "resolved %d comps (need %d) -- the sample is spread too "
+                        "thin to rank",
+                        sd["id"], stats["sample_size"], len(stats["comps"]),
+                        MIN_COMPS_TO_PUBLISH)
             continue
 
         # Per-comp build detail lives in its own file and is fetched on demand,
