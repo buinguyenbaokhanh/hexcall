@@ -223,6 +223,25 @@ def champion_icon(cid: str, stats: dict) -> str | None:
     return None
 
 
+def trait_display(tid: str, stats: dict) -> tuple[str, str | None]:
+    """(name, icon) for a trait id from any set.
+
+    Same shape of problem as champions: the client's trait catalogue covers the
+    published set only, so a Set 15 trait rendered as a grey hex with a number
+    and no icon. Data Dragon's tft-trait.json spans sets, so the resolver has
+    both -- it was only ever a question of asking it.
+    """
+    name = (stats.get("trait_names") or {}).get(tid)
+    r = _resolver()
+    if r:
+        try:
+            return (name or r.trait(tid)), r.icon_url("traits", tid)
+        except Exception:  # noqa: BLE001
+            pass
+    from static_data import prettify_id
+    return (name or prettify_id(tid)), None
+
+
 def comp_label(sig: str, stats: dict) -> str:
     """A readable name for a comp signature.
 
@@ -1131,7 +1150,12 @@ def _recent(all_games: list[dict], stats: dict) -> list[dict]:
          "damage": g["participant"].get("total_damage_to_players"),
          "augments": [stats["augment_names"].get(a, a) for a in g["augments"]],
          "traits": [
-             {"name": t["name"], "units": t.get("num_units", 0), "style": t.get("style", 0)}
+             # `style` comes straight from the match, which is Riot's own value
+             # for the tier the board reached -- more authoritative than
+             # re-deriving it from breakpoint tables, and available for sets
+             # whose breakpoints the client never loaded.
+             dict(zip(("label", "icon"), trait_display(t["name"], stats)),
+                  name=t["name"], units=t.get("num_units", 0), style=t.get("style", 0))
              for t in sorted(g["participant"].get("traits", []),
                              key=lambda t: (-t.get("style", 0), -t.get("num_units", 0)))
              if t.get("tier_current", 0) > 0

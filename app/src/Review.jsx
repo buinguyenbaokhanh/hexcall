@@ -552,9 +552,14 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
 
                   <div className="flex-1 min-w-[260px]">
                     <div className="flex flex-wrap gap-1 mb-1.5">
+                      {/* traitMeta covers the published set only, so older-set
+                          games fall back to the name and icon the server
+                          resolved. `style` comes from the match either way,
+                          which is more authoritative than deriving it. */}
                       {g.traits?.map((t) => (
-                        <TraitBadge key={t.name} name={t.name} units={t.units}
-                                    meta={traitMeta[t.name]} showName={false} size={17} />
+                        <TraitBadge key={t.name} name={t.label || t.name} units={t.units}
+                                    meta={traitMeta[t.name] || { name: t.label, icon: t.icon }}
+                                    style={t.style} showName={false} size={17} />
                       ))}
                     </div>
                     <div className="flex flex-wrap gap-1.5">

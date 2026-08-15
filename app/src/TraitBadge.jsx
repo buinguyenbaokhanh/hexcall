@@ -48,8 +48,16 @@ function HexIcon({ icon, color, size, name }) {
   );
 }
 
-export function TraitBadge({ name, units, meta, size = 26, showName = true, pct }) {
-  const style = styleFor(meta, units);
+/**
+ * `style` overrides the breakpoint-derived tier when the caller already knows
+ * it. The match API reports the tier a board actually reached, which is Riot's
+ * own value and beats re-deriving it -- and it's the only source available for
+ * a set whose breakpoint tables the client never loaded, where styleFor would
+ * return 0 and paint every trait inactive grey.
+ */
+export function TraitBadge({ name, units, meta, size = 26, showName = true, pct,
+                             style: styleOverride }) {
+  const style = styleOverride ?? styleFor(meta, units);
   const color = STYLE_COLORS[style] ?? STYLE_COLORS[0];
   const label = meta?.name || name;
 
