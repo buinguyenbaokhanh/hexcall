@@ -225,7 +225,16 @@ export default function App() {
               HEXCALL
             </h1>
             <span className="text-[11px] mono truncate" style={{ color: "var(--dim)" }}>
-              patch {stats.patch || "—"} · {stats.sample_size.toLocaleString()} boards · {timeAgo(stats.generated_at)}
+              {/* The API reports only the League client build, which is not
+                  what players call the patch. When PATCH_NAMES maps it, show
+                  the familiar label and keep the build in the tooltip so the
+                  two can still be reconciled. */}
+              <span title={stats.patch_label && stats.patch_label !== stats.patch
+                             ? `TFT patch ${stats.patch_label} · client build ${stats.patch}`
+                             : `client build ${stats.patch}`}>
+                patch {stats.patch_label || stats.patch || "—"}
+              </span>
+              {" · "}{stats.sample_size.toLocaleString()} boards · {timeAgo(stats.generated_at)}
               {status === "live" && <span style={{ color: "var(--signal)" }}> · live</span>}
             </span>
           </div>

@@ -45,6 +45,7 @@ from aggregate import build_stats, puuids_for_tiers
 from comp_detail import build_comp_details, slug
 from static_data import team_planner_codes, team_planner_code
 from trends import build_trends
+from providers import PATCH_NAMES
 
 log = logging.getLogger("publish")
 
@@ -275,6 +276,10 @@ def build_slice(conn: sqlite3.Connection, slice_def: dict, patch: str | None,
     stats["slice_id"] = slice_def["id"]
     stats["slice_label"] = slice_def["label"]
     stats["patch"] = patch
+    # What players call this patch, when someone has told us. The build number
+    # is accurate but not the label anyone else uses.
+    stats["patch_label"] = PATCH_NAMES.get(patch, patch)
+    stats["patch_build"] = patch
     stats["generated_at"] = int(time.time())
     stats["comp_names"] = name_comps(stats.get("comp_shapes", {}), comp_names, resolver)
     carry_ids = {sig.partition(" :: ")[2] for sig in stats["comps"]} - {""}
@@ -375,6 +380,7 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
         planner_codes = {}
 
     manifest = {"generated_at": int(time.time()), "patch": patch,
+                "patch_label": PATCH_NAMES.get(patch, patch) if patch else None,
                 "tft_set": tft_set, "slices": []}
 
     for sd in SLICES:

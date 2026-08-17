@@ -111,6 +111,28 @@ COMP_NAMES: dict[str, str] = {
 }
 
 
+# Display names for patches, keyed by the client build the match API reports.
+#
+# The API gives no TFT patch number. Every match carries the LEAGUE client
+# build in game_version ("Linux Version 16.16.804.9184") plus the set number,
+# and nothing else -- so a build is all this pipeline can key on, and 16.16 is
+# what it can honestly call the patch.
+#
+# Players do not use that number. TFT sites and the game itself label the same
+# patch by its TFT number, which is what someone comparing this site against
+# MetaTFT will be holding in their head. There is no derivation available: the
+# TFT number is not in the payload, and it is not a clean function of the build
+# (MetaTFT showed 17.9 across both 16.15 and 16.16), so guessing a mapping in
+# code would be wrong the moment either side moved.
+#
+# Hence a hand-edited map, the same treatment COMP_NAMES gets and for the same
+# reason: a human reads it off the client once per patch. Unmapped builds fall
+# back to the build number, which is accurate if unfamiliar rather than wrong.
+PATCH_NAMES: dict[str, str] = {
+    # "16.16": "17.9",
+}
+
+
 def _auto_comp_name(traits_part: str, carry: str, resolver) -> str:
     head = traits_part.split("_")[0]
     head = "".join(ch for ch in head if not ch.isdigit())
