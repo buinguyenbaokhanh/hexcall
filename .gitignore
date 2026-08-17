@@ -14,11 +14,18 @@ node_modules/
 app/dist/
 
 # generated data
-pipeline/tft.db
+# Globbed rather than named: a Finder or iCloud copy produces "tft 2.db" and
+# "tft 2.db-journal", which the exact names missed -- a 23-file pile of stale
+# duplicates accumulated in the working tree before anyone noticed.
+pipeline/tft*.db
 # SQLite side files: transient, and present whenever a crawl is mid-write.
-pipeline/tft.db-journal
-pipeline/tft.db-wal
-pipeline/tft.db-shm
+pipeline/tft*.db-journal
+pipeline/tft*.db-wal
+pipeline/tft*.db-shm
+
+# Finder/iCloud duplicates ("manifest 2.json"). They shadow real published
+# data, are always stale, and are never wanted in the repo.
+* 2.*
 pipeline/public/
 pipeline/ddragon_cache/
 pipeline/scheduler.lock
