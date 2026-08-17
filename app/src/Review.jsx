@@ -357,7 +357,13 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                 </span>
                 {qview.field_comparable && (
                   <span className="mono text-[11px]" style={{ color: "var(--dim)" }}>
-                    field {s.field_avg.toFixed(2)}
+                    {/* An unfiltered slice averages 4.50 because every lobby
+                        contributes placements 1..8 once -- an identity, not a
+                        measurement, and it does not change between slices.
+                        Only tier-filtered slices measure anything here. */}
+                    {s.field_avg_measured
+                      ? `${data.compared_against} avg ${s.field_avg.toFixed(2)}`
+                      : `average ${s.field_avg.toFixed(2)}`}
                   </span>
                 )}
               </span>

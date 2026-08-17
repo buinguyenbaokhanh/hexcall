@@ -1082,6 +1082,21 @@ def _queue_view(games: list[dict], stats: dict, queue: int | None) -> dict | Non
         "top4_rate": round(sum(1 for p in placements if p <= 4) / len(placements), 3),
         "win_rate": round(sum(1 for p in placements if p == 1) / len(placements), 3),
         "field_avg": stats["baseline_placement"],
+        # Whether that number is a MEASUREMENT or an identity.
+        #
+        # Every 8-player lobby contributes placements 1..8 exactly once, so the
+        # mean over all boards in an unfiltered slice is 4.5 by construction --
+        # it cannot come out any other way, and it is identical for global-all
+        # and sg2-all despite one having twice the sample. Only slices that
+        # filter PARTICIPANTS carry information here: global-apex reads 4.054,
+        # because apex players in mixed lobbies genuinely place better.
+        #
+        # Presented as "field 4.50" it reads like a benchmark the slice was
+        # measured against, and invites the conclusion that switching slices
+        # would move it. The client labels the two cases differently instead of
+        # hiding the number, since 4.5 is still the honest midpoint to sit
+        # above or below.
+        "field_avg_measured": abs(stats["baseline_placement"] - 4.5) > 0.05,
         "placement_counts": {str(i): placements.count(i) for i in range(1, 9)},
         "low_sample": len(games) < MIN_GAMES,
     }
