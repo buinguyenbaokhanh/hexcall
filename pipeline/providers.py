@@ -122,14 +122,19 @@ COMP_NAMES: dict[str, str] = {
 # patch by its TFT number, which is what someone comparing this site against
 # MetaTFT will be holding in their head. There is no derivation available: the
 # TFT number is not in the payload, and it is not a clean function of the build
-# (MetaTFT showed 17.9 across both 16.15 and 16.16), so guessing a mapping in
-# code would be wrong the moment either side moved.
+# -- MetaTFT displayed 17.9 while this pipeline was still publishing 16.15, so
+# the two do not step together and a rule in code would be wrong silently.
+#
+# Only builds someone has actually read off the client belong here. 16.15 is
+# absent on purpose: it may well be 17.8, but the observation above is equally
+# consistent with 16.15 being 17.9 too, and an unmapped build falls back to its
+# own number, which is unfamiliar rather than wrong.
 #
 # Hence a hand-edited map, the same treatment COMP_NAMES gets and for the same
 # reason: a human reads it off the client once per patch. Unmapped builds fall
 # back to the build number, which is accurate if unfamiliar rather than wrong.
 PATCH_NAMES: dict[str, str] = {
-    # "16.16": "17.9",
+    "16.16": "17.9",
 }
 
 
