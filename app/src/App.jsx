@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
   X, Info, Sparkles, ChevronRight, AlertTriangle, Database,
   RefreshCw, WifiOff, Check, Layers, Zap, Users, History, Swords, Hexagon,
-  TrendingUp,
+  TrendingUp, MessageCircle,
 } from "lucide-react";
 import Review from "./Review.jsx";
 import CompBuild from "./CompBuild.jsx";
@@ -14,6 +14,7 @@ import CompsTab from "./Comps.jsx";
 import ItemsTab from "./Items.jsx";
 import TraitsTab from "./Traits.jsx";
 import TrendsTab from "./Trends.jsx";
+import ChatTab from "./Chat.jsx";
 import { ChampionIcon, AugmentIcon, carryIdFromSig } from "./icons.jsx";
 import { timeAgo } from "./table.jsx";
 import {
@@ -296,6 +297,7 @@ export default function App() {
             ["traits", "Traits", Users],
             ["trends", "Trends", TrendingUp],
             ["review", "Review My Games", History],
+            ["chat", "Ask", MessageCircle],
           ].map(([id, label, Icon]) => (
             <button key={id} onClick={() => setTab(id)}
                     role="tab" aria-selected={tab === id} id={`tab-${id}`}
@@ -347,6 +349,10 @@ export default function App() {
 
         {tab === "review" && <Review apiBase={API_BASE} sliceId={sliceId} staticMode={STATIC_MODE}
                                      traitMeta={traitMeta} />}
+
+        {tab === "chat" && <ChatTab apiBase={API_BASE} staticMode={STATIC_MODE}
+                                    sliceId={sliceId}
+                                    patchLabel={stats.patch_label || stats.patch} />}
       </main>
 
       {/* Riot's third-party policy requires this acknowledgement in the
