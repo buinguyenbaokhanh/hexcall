@@ -300,5 +300,54 @@ def review():
     return _served(result, max_age=REVIEW_TTL)
 
 
+# --- chat -----------------------------------------------------------------
+#
+# Like /api/review this calls out at request time, so it needs a key and cannot
+# run on a static deploy. Unlike /api/review the cost is per question rather
+# than per crawl, so it is rate limited on the same bucket.
+
+CHAT_MAX_CHARS = 500
+
+
+@app.post("/api/chat")
+def chat():
+    from chat import answer, NoKey
+
+    body = request.get_json(silent=True) or {}
+    question = (body.get("question") or "").strip()
+    history = body.get("history") or []
+    slice_id = body.get("slice") or "global-all"
+
+    if not question:
+        return jsonify({"error": "ask something"}), 400
+    if len(question) > CHAT_MAX_CHARS:
+        return jsonify({"error": f"question too long (max {CHAT_MAX_CHARS} characters)"}), 400
+    if not slice_id.replace("-", "").isalnum():
+        return jsonify({"error": "bad slice id"}), 400
+    if not isinstance(history, list):
+        return jsonify({"error": "history must be a list"}), 400
+
+    retry_after = _rate_limited(_client_id())
+    if retry_after:
+        r = jsonify({"error": "Too many questions. This endpoint calls a model per "
+                              "question, so it shares the review rate limit.",
+                     "retry_after_seconds": retry_after})
+        r.status_code = 429
+        r.headers["Retry-After"] = str(retry_after)
+        return r
+
+    try:
+        result = answer(question, history=history, slice_id=slice_id)
+    except NoKey as e:
+        return jsonify({"error": str(e), "needs_key": True}), 503
+    except Exception as e:  # noqa: BLE001
+        app.logger.exception("chat failed")
+        return jsonify({"error": f"chat failed: {e}"}), 502
+
+    # Deliberately uncached: the same question against a newer build should get
+    # a newer answer, and answers are cheap relative to a crawl.
+    return jsonify(result)
+
+
 if __name__ == "__main__":
     app.run(port=8787, debug=False)
