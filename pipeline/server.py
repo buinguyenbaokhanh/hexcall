@@ -317,6 +317,8 @@ def chat():
     question = (body.get("question") or "").strip()
     history = body.get("history") or []
     slice_id = body.get("slice") or "global-all"
+    viewing = body.get("viewing") or {}
+    provider = body.get("provider")  # optional per-question override, for A/B
 
     if not question:
         return jsonify({"error": "ask something"}), 400
@@ -337,7 +339,9 @@ def chat():
         return r
 
     try:
-        result = answer(question, history=history, slice_id=slice_id)
+        result = answer(question, history=history, slice_id=slice_id,
+                        viewing=viewing if isinstance(viewing, dict) else {},
+                        provider=provider)
     except NoKey as e:
         return jsonify({"error": str(e), "needs_key": True}), 503
     except Exception as e:  # noqa: BLE001
