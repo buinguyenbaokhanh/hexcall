@@ -14,6 +14,8 @@ import CompsTab from "./Comps.jsx";
 import ItemsTab from "./Items.jsx";
 import TraitsTab from "./Traits.jsx";
 import TrendsTab from "./Trends.jsx";
+import ChatDock from "./ChatDock.jsx";
+import { FocusProvider, useFocus } from "./focus.jsx";
 import { ChampionIcon, AugmentIcon, carryIdFromSig } from "./icons.jsx";
 import { timeAgo } from "./table.jsx";
 import {
@@ -133,6 +135,17 @@ function useCatalog(name, version) {
   return catalog;
 }
 
+/**
+ * Switches tab when the assistant asks. Separate from App so it can call
+ * useFocus, which only works inside the provider App renders.
+ */
+function NavBridge({ onTab }) {
+  const { nav } = useFocus();
+  useEffect(() => { if (nav?.tab) onTab(nav.tab); }, [nav]);
+  return null;
+}
+
+
 export default function App() {
   const { manifest, stats, sliceId, setSlice, status, error } = useStatsFeed();
   const catalogVersion = manifest?.generated_at;
@@ -161,7 +174,16 @@ export default function App() {
     ? (baseline.find((c) => c.sig === openComp.sig) || openComp)
     : null;
 
+  // Labels for the dock, so it can say which view the question came from.
+  const TAB_LABELS = {
+    advisor: "Advisor", planner: "Items I hold", comps: "Comps", augments: "Augments",
+    champions: "Units", items: "Items", traits: "Traits", trends: "Trends",
+    review: "Review My Games",
+  };
+
   return (
+    <FocusProvider>
+    <NavBridge onTab={setTab} />
     <div className="min-h-screen w-full" style={{ background: "var(--bg)", color: "var(--text)" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
@@ -373,6 +395,12 @@ export default function App() {
         </div>
       </footer>
 
+      {/* Available from every tab -- it can see what you're reading, which a
+          tab could not. Never opens itself; "/" opens it, Escape closes. */}
+      <ChatDock apiBase={API_BASE} staticMode={STATIC_MODE} sliceId={sliceId}
+                patchLabel={stats.patch_label || stats.patch}
+                tabLabel={TAB_LABELS[tab] || tab} />
+
       {/* Comp detail */}
       {openComp && (
         // The dialog is a fixed-height box that scrolls internally, rather than
@@ -514,5 +542,6 @@ export default function App() {
         </div>
       )}
     </div>
+    </FocusProvider>
   );
 }

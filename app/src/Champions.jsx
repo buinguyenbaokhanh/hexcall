@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { ChampionIcon, ItemIcon } from "./icons.jsx";
 import { assignTiers, TierBadge } from "./tiers.jsx";
+import { useReportFocus, useIncomingNav } from "./focus.jsx";
 import { StatGrid } from "./stats.jsx";
 import { TraitChip } from "./TraitBadge.jsx";
 import {
@@ -164,8 +165,19 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
     return out;
   }, [rows, roleFilter, costFilter, query]);
 
+  // The assistant links here; filter to whatever it was talking about rather
+  // than dropping the player at the top of a long table.
+  useIncomingNav("champions", setQuery);
+
+  // Tell the assistant what's open, so a question can say "it" and resolve.
+  const reportFocus = useReportFocus();
   const toggle = (id) =>
-    setExpanded((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setExpanded((p) => {
+      const n = new Set(p);
+      if (n.has(id)) { n.delete(id); reportFocus("unit", null); }
+      else { n.add(id); reportFocus("unit", rows.find((r) => r.id === id)?.name); }
+      return n;
+    });
 
   const baseline = stats.baseline_placement;
 

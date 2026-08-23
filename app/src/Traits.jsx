@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import { ChampionIcon } from "./icons.jsx";
 import { TraitBadge } from "./TraitBadge.jsx";
 import { assignTiers, TierBadge } from "./tiers.jsx";
+import { useReportFocus, useIncomingNav } from "./focus.jsx";
 import { PageHeader, SegmentedToggle, StatTable, Place, PlaceChange, Frequency, pct } from "./table.jsx";
 
 /**
@@ -87,8 +88,19 @@ export default function Traits({ stats, traitMeta, championMeta }) {
     return rows.filter((r) => r.name.toLowerCase().includes(q));
   }, [rows, query]);
 
+  // The assistant links here; filter to whatever it was talking about rather
+  // than dropping the player at the top of a long table.
+  useIncomingNav("traits", setQuery);
+
+  // Tell the assistant what's open, so a question can say "it" and resolve.
+  const reportFocus = useReportFocus();
   const toggle = (id) =>
-    setExpanded((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setExpanded((p) => {
+      const n = new Set(p);
+      if (n.has(id)) { n.delete(id); reportFocus("trait", null); }
+      else { n.add(id); reportFocus("trait", rows.find((r) => r.id === id)?.name); }
+      return n;
+    });
 
   const baseline = stats.baseline_placement;
 
