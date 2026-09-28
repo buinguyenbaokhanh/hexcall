@@ -45,7 +45,9 @@ from aggregate import build_stats, puuids_for_tiers
 from comp_detail import build_comp_details, slug
 from static_data import team_planner_codes, team_planner_code
 from trends import build_trends
-from providers import PATCH_NAMES
+from calendar import timegm
+
+from providers import PATCH_NAMES, PATCH_CALENDAR
 
 log = logging.getLogger("publish")
 
@@ -184,6 +186,90 @@ def patch_filter(patch: str) -> str:
     return f"%Version {patch}.%"
 
 
+# Calendar-assigned patches are written into the game_version column in the
+# same "Version X.Y." shape the client used to report, so every existing
+# consumer -- patch_counts, patch_filter, the prune -- reads them unchanged. The
+# raw match JSON keeps what the client actually sent.
+CALENDAR_PREFIX = "Calendar Version "
+UNASSIGNED = "Unassigned (patch rollout window or past the calendar)"
+
+# A patch rolls out region by region: the Asian servers take it during their
+# morning, which is the previous evening in UTC, and the Americas last. Games
+# from this window around each listed date could be on either patch.
+ROLLOUT_BEFORE_S = 12 * 3600
+ROLLOUT_AFTER_S = 24 * 3600
+# Patches land every two weeks. Past this, the table has not been updated for
+# the next patch, and assigning later games to the last entry would blend two
+# patches under one label.
+CALENDAR_MAX_PATCH_DAYS = 16
+
+
+def _calendar_starts(table: dict[str, str]) -> list[tuple[float, str]]:
+    """[(UTC epoch seconds of the listed date, patch)], oldest first."""
+    return sorted((timegm(time.strptime(d, "%Y-%m-%d")), p) for p, d in table.items())
+
+
+def calendar_patch(game_datetime_ms: int | None,
+                   table: dict[str, str] | None = None) -> str | None:
+    """The patch a match was played on, from when it was played, or None.
+
+    None inside a rollout window, before the first entry, or too long after
+    the last one -- an unassigned match is left out of every patch rather than
+    risk putting it in the wrong one.
+    """
+    if not game_datetime_ms:
+        return None
+    starts = _calendar_starts(PATCH_CALENDAR if table is None else table)
+    t = game_datetime_ms / 1000
+    for i, (start, patch) in enumerate(starts):
+        if t < start - ROLLOUT_BEFORE_S:
+            return None
+        if t < start + ROLLOUT_AFTER_S:
+            return None                      # rolling out: could be either
+        nxt = starts[i + 1][0] if i + 1 < len(starts) else None
+        if nxt is not None and t >= nxt - ROLLOUT_BEFORE_S:
+            continue
+        if nxt is None and t >= start + CALENDAR_MAX_PATCH_DAYS * 86400:
+            return None
+        return patch
+    return None
+
+
+def assign_calendar_patches(conn: sqlite3.Connection) -> None:
+    """Give matches whose client reported no version a patch from the calendar.
+
+    Re-derived every run for every match without a real version, so editing
+    PATCH_CALENDAR (a new patch, a corrected date) takes effect on the next
+    publish without re-crawling.
+    """
+    rows = conn.execute(
+        "SELECT match_id, game_datetime, game_version FROM matches "
+        "WHERE game_version IS NULL OR game_version NOT GLOB '*[0-9].[0-9]*' "
+        f"OR game_version LIKE '{CALENDAR_PREFIX}%'").fetchall()
+    if not rows:
+        return
+    updates, assigned, late = [], Counter(), 0
+    starts = _calendar_starts(PATCH_CALENDAR)
+    cutoff = starts[-1][0] + CALENDAR_MAX_PATCH_DAYS * 86400 if starts else None
+    for mid, dt, old in rows:
+        patch = calendar_patch(dt)
+        new = f"{CALENDAR_PREFIX}{patch}.0" if patch else UNASSIGNED
+        if patch:
+            assigned[patch] += 1
+        elif dt and cutoff and dt / 1000 >= cutoff:
+            late += 1
+        if new != old:
+            updates.append((new, mid))
+    conn.executemany("UPDATE matches SET game_version = ? WHERE match_id = ?", updates)
+    conn.commit()
+    log.info("calendar patches for %d unversioned matches: %s, %d unassigned",
+             len(rows), dict(sorted(assigned.items())), len(rows) - sum(assigned.values()))
+    if late:
+        log.warning("%d matches are more than %d days past the newest patch in "
+                    "PATCH_CALENDAR (%s) -- add the next patch's date in providers.py",
+                    late, CALENDAR_MAX_PATCH_DAYS, starts[-1][1])
+
+
 def auto_comp_name(shape: dict, resolver) -> str | None:
     """A readable comp name derived from its defining trait and carry.
 
@@ -294,6 +380,7 @@ def build_slice(conn: sqlite3.Connection, slice_def: dict, patch: str | None,
     # is accurate but not the label anyone else uses.
     stats["patch_label"] = PATCH_NAMES.get(patch, patch)
     stats["patch_build"] = patch
+    stats["patch_source"] = patch_source(conn, patch)
     stats["generated_at"] = int(time.time())
     stats["comp_names"] = name_comps(stats.get("comp_shapes", {}), comp_names, resolver)
     carry_ids = {sig.partition(" :: ")[2] for sig in stats["comps"]} - {""}
@@ -350,6 +437,16 @@ def _write(path: Path, payload: dict) -> dict:
     }
 
 
+def patch_source(conn: sqlite3.Connection, patch: str | None) -> str | None:
+    """"build" when the client reported the patch, "calendar" when it was
+    assigned from PATCH_CALENDAR -- so the UI can say which it is showing."""
+    if not patch:
+        return None
+    hit = conn.execute("SELECT 1 FROM matches WHERE game_version LIKE ? LIMIT 1",
+                       (f"{CALENDAR_PREFIX}{patch}.%",)).fetchone()
+    return "calendar" if hit else "build"
+
+
 def _explain_missing_patch(conn: sqlite3.Connection, tft_set: int | None) -> None:
     """Log why no patch could be read, with what the parser was given.
 
@@ -377,6 +474,7 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
             comp_names: dict | None = None, keep_builds: int = 5,
             patch: str | None = None) -> Path:
     conn = sqlite3.connect(db_path)
+    assign_calendar_patches(conn)
     forced = patch is not None
     patch = patch or current_patch(conn, tft_set=tft_set)
     if patch:
@@ -423,6 +521,7 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
 
     manifest = {"generated_at": int(time.time()), "patch": patch,
                 "patch_label": PATCH_NAMES.get(patch, patch) if patch else None,
+                "patch_source": patch_source(conn, patch),
                 "tft_set": tft_set, "slices": []}
 
     for sd in SLICES:

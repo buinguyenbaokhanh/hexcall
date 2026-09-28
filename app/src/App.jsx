@@ -254,7 +254,9 @@ export default function App() {
                   what players call the patch. When PATCH_NAMES maps it, show
                   the familiar label and keep the build in the tooltip so the
                   two can still be reconciled. */}
-              <span title={stats.patch_label && stats.patch_label !== stats.patch
+              <span title={stats.patch_source === "calendar"
+                             ? `TFT patch ${stats.patch_label} · assigned from match dates (the Set ${manifest?.tft_set ?? ""} client reports no version)`
+                             : stats.patch_label && stats.patch_label !== stats.patch
                              ? `TFT patch ${stats.patch_label} · client build ${stats.patch}`
                              : `client build ${stats.patch}`}>
                 {manifest?.tft_set && `Set ${manifest.tft_set} · `}patch {stats.patch_label || stats.patch || "—"}

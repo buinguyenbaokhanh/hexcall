@@ -173,6 +173,11 @@ into Fast 9) and the review engine is asserted to find all four.
 
 ## Known limitations
 
+- **Set 18 patches come from a calendar.** Since TFT moved to Unreal, every match
+  reports its version as `TFT Unreal Version ?.?.?.?`, so a match's patch is assigned
+  from when it was played using `PATCH_CALENDAR` in `providers.py`. Add each new
+  patch's date there; games in a patch's rollout window, or more than 16 days past
+  the newest entry, are left out rather than guessed.
 - **Comp naming is hand-maintained.** `COMP_NAMES` in `providers.py` maps trait
   signatures to community names. These shift every patch and auto-generated labels read
   awkwardly.

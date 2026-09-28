@@ -36,7 +36,7 @@ import time
 from pathlib import Path
 
 from ingest import crawl
-from publish import publish, current_patch, patch_filter
+from publish import publish, current_patch, patch_filter, assign_calendar_patches
 
 log = logging.getLogger("scheduler")
 LOCK = Path("scheduler.lock")
@@ -121,7 +121,9 @@ def cycle(platforms: list[str], tiers: list[str], players_per_tier: int,
             log.exception("crawl failed for %s -- continuing", platform)
             failed += 1
 
-    patch = current_patch(sqlite3.connect(db), tft_set=tft_set)
+    conn = sqlite3.connect(db)
+    assign_calendar_patches(conn)
+    patch = current_patch(conn, tft_set=tft_set)
     if patch and state.get("patch") and patch != state["patch"]:
         removed = prune_old_patches(db, patch)
         log.warning("patch changed %s -> %s; pruned %d stale matches",
