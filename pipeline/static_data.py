@@ -361,6 +361,26 @@ def load_all(version: str | None = None, locale: str = "en_US") -> dict:
     }
 
 
+# Set 18 dropped the "TFT<n>_" prefix every earlier set used for a "DA_" one,
+# and not in one shape: the match API returns "DA_18_Alistar" and "DA_Vi18"
+# side by side, sometimes with a variant suffix ("DA_Nidalee18_AP").
+_TFT_PREFIX = re.compile(r"^TFT\d*_?", re.I)
+_DA_NUMBERED = re.compile(r"^DA_\d+_")
+_DA_SUFFIXED = re.compile(r"^DA_([A-Za-z]+?)\d+(?=_|$)")
+
+
+def strip_set_affixes(raw_id: str) -> str:
+    """The id with its set marker removed, in any of the shapes Riot uses.
+
+    'TFT17_Akali' / 'DA_18_Alistar' / 'DA_Vi18' -> 'Akali' / 'Alistar' / 'Vi'.
+    """
+    if _DA_NUMBERED.match(raw_id):
+        return _DA_NUMBERED.sub("", raw_id)
+    if raw_id.startswith("DA_"):
+        return _DA_SUFFIXED.sub(r"\1", raw_id).removeprefix("DA_")
+    return _TFT_PREFIX.sub("", raw_id)
+
+
 def prettify_id(raw_id: str) -> str:
     """Fallback for IDs Data Dragon hasn't published yet.
     'TFT17_Augment_RichGetRicher' -> 'Rich Get Richer'
@@ -373,7 +393,8 @@ def prettify_id(raw_id: str) -> str:
     on an id that never had any. Words that already carry capitals are left
     alone -- title-casing them would turn 'LeBlanc' into 'Leblanc'.
     """
-    s = re.sub(r"^TFT\d*_?(Augment_|Item_)?", "", raw_id, flags=re.I)
+    s = strip_set_affixes(raw_id)
+    s = re.sub(r"^(Augment_|Item_)", "", s, flags=re.I)
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", s)
     s = s.replace("_", " ").strip()
     return " ".join(w.capitalize() if w.islower() else w for w in s.split())
@@ -389,11 +410,45 @@ class NameResolver:
         # Loaded lazily by item_icon() on the first Data Dragon miss; None
         # means "not attempted yet", {} means "attempted and unavailable".
         self._cdragon_items: dict[str, dict] | None = None
+        self._cdragon_index: dict[str, dict[str, dict]] | None = None
+
+    def _cdragon(self) -> dict[str, dict[str, dict]]:
+        """Community Dragon's records, indexed like the Data Dragon tables.
+
+        Data Dragon can know a set's traits and still miss its champions and
+        items entirely -- Set 18 shipped that way, under the new "DA_" ids, and
+        every unit fell through to a prettified id with no portrait. CDragon
+        carries the same apiNames for all four tables, across every set, so it
+        is the fallback before prettifying rather than only for item icons.
+        """
+        if self._cdragon_index is None:
+            index: dict[str, dict[str, dict]] = {
+                "champions": {}, "traits": {}, "items": {}, "augments": {}}
+            try:
+                raw = _fetch_cdragon_raw()
+            except Exception:  # noqa: BLE001
+                raw = {}
+            for s in raw.get("setData", []):
+                for c in s.get("champions") or []:
+                    if c.get("apiName") and c.get("name"):
+                        index["champions"].setdefault(c["apiName"], c)
+                for t in s.get("traits") or []:
+                    if t.get("apiName") and t.get("name"):
+                        index["traits"].setdefault(t["apiName"], t)
+            for it in raw.get("items", []):
+                if it.get("apiName") and it.get("name"):
+                    table = "augments" if it.get("isAugment") else "items"
+                    index[table].setdefault(it["apiName"], it)
+            self._cdragon_index = index
+        return self._cdragon_index
 
     def _lookup(self, table: str, raw_id: str) -> str:
         entry = self.static.get(table, {}).get(raw_id)
         if entry and entry.get("name"):
             return entry["name"]
+        cd = self._cdragon()[table].get(raw_id)
+        if cd:
+            return cd["name"]
         self._misses.add(f"{table}:{raw_id}")
         return prettify_id(raw_id)
 
@@ -450,7 +505,11 @@ class NameResolver:
         icon = self.icon_url("champions", raw_id)
         if icon:
             return icon
-        name = re.sub(r"^TFT\d*_", "", raw_id)
+        cd = self._cdragon()["champions"].get(raw_id) or {}
+        art = cd.get("squareIcon") or cd.get("tileIcon") or cd.get("icon")
+        if art:
+            return cdragon_asset(art)
+        name = strip_set_affixes(raw_id).split("_")[0]
         key = self._lol_by_lower.get(name.lower())
         if not key:
             return None

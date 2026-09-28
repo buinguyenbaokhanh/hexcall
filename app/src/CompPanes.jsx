@@ -2,7 +2,15 @@ import React, { useState, useMemo } from "react";
 import { ChampionIcon, ItemIcon } from "./icons.jsx";
 import { TraitBadge } from "./TraitBadge.jsx";
 
-const short = (id = "") => id.replace(/^TFT\d*_(Item_)?/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+// Fallback label for an id with no resolved name. Set ids carry their set in
+// one of three shapes -- "TFT17_Akali", and from Set 18 "DA_18_Alistar" or
+// "DA_Vi18" -- so strip whichever is there.
+const short = (id = "") => id
+  .replace(/^TFT\d*_(Item_)?/, "")
+  .replace(/^DA_\d+_/, "")
+  .replace(/^DA_([A-Za-z]+?)\d+(?=_|$)/, "$1")
+  .replace(/^DA_/, "")
+  .replace(/([a-z0-9])([A-Z])/g, "$1 $2");
 
 const place = (v, baseline) =>
   v < baseline - 0.15 ? "var(--signal)" : v > baseline + 0.15 ? "var(--danger)" : "var(--text)";

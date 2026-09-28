@@ -143,7 +143,7 @@ jobs:
           import json
           m = json.load(open("data/manifest.json"))
           label = m.get("patch_label") or m.get("patch")
-          head = f"Crawl Set {m.get('tft_set')} patch {label}"
+          head = f"Crawl Set {m.get('tft_set')}" + (f" patch {label}" if label else "")
           if m.get("patch_label") and m["patch_label"] != m.get("patch"):
               head += f" (build {m['patch']})"
           lines = [f"{s['id']}: {s['sample_size']:,} boards, {s['comps']} comps" for s in m["slices"]]

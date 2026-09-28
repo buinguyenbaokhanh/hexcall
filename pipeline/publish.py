@@ -350,6 +350,29 @@ def _write(path: Path, payload: dict) -> dict:
     }
 
 
+def _explain_missing_patch(conn: sqlite3.Connection, tft_set: int | None) -> None:
+    """Log why no patch could be read, with what the parser was given.
+
+    With no patch the build still publishes, just unfiltered by patch -- and
+    nothing else says so. The first Set 18 crawl did exactly that across 3,340
+    matches. Only info-level version fields are logged, never participants.
+    """
+    clause, params = _set_clause(tft_set)
+    n = conn.execute("SELECT COUNT(*) FROM matches WHERE 1=1" + clause, params).fetchone()[0]
+    if not n:
+        return
+    versions = [v for (v,) in conn.execute(
+        "SELECT DISTINCT game_version FROM matches WHERE 1=1" + clause + " LIMIT 5", params)]
+    row = conn.execute("SELECT raw FROM matches WHERE 1=1" + clause + " LIMIT 1",
+                       params).fetchone()
+    info = json.loads(row[0]).get("info", {}) if row else {}
+    version_like = {k: v for k, v in info.items()
+                    if any(w in k.lower() for w in ("version", "patch", "build"))}
+    log.warning("no patch readable from %d stored matches; publishing them unfiltered by "
+                "patch. game_version values: %r; version-like info fields: %r; info keys: %s",
+                n, versions, version_like, sorted(info))
+
+
 def publish(db_path: str = "tft.db", tft_set: int | None = None,
             comp_names: dict | None = None, keep_builds: int = 5,
             patch: str | None = None) -> Path:
@@ -379,6 +402,8 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
                 "%d more matches to switch.",
                 newest[0], newest[1], have, MIN_PATCH_MATCHES, patch,
                 MIN_PATCH_MATCHES - have)
+    else:
+        _explain_missing_patch(conn, tft_set)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     out = BUILD_DIR / stamp
     out.mkdir(parents=True, exist_ok=True)
