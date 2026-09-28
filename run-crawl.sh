@@ -20,7 +20,7 @@ if [ -z "${RIOT_API_KEY:-}" ]; then
 fi
 
 PLATFORM="${1:-na1}"
-SET_NUM="${2:-17}"
+SET_NUM="${2:-18}"
 
 cd pipeline
 ../.venv/bin/python scheduler.py --once \

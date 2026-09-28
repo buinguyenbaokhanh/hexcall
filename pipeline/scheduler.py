@@ -15,8 +15,9 @@ Six hours is a reasonable default. Considerations:
   * A patch drops roughly every two weeks and invalidates the meta. Detect the
     version change and start a fresh window rather than blending patches --
     mixed-patch stats are actively misleading right after a balance change.
-  * A personal key (20 req/s, 100 req/2min) realistically supports one region
-    at modest depth. Plan for a production key before going multi-region.
+  * A personal key (20 req/s, 100 req/2min) supports a daily crawl of three
+    regions' apex ladders -- what .github/workflows/crawl.yml runs. Much more
+    depth or frequency than that needs a production key.
 
 Failure policy
 --------------
@@ -106,9 +107,11 @@ def prune_old_patches(db: str, keep_patch: str) -> int:
 
 def cycle(platforms: list[str], tiers: list[str], players_per_tier: int,
           matches_per_player: int, lookback_days: int, db: str,
-          tft_set: int | None, comp_names: dict | None) -> None:
+          tft_set: int | None, comp_names: dict | None) -> int:
+    """One crawl + publish pass. Returns how many platforms failed to crawl."""
     state = load_state()
 
+    failed = 0
     for platform in platforms:
         try:
             crawl(platform, tiers, players_per_tier, matches_per_player,
@@ -116,8 +119,9 @@ def cycle(platforms: list[str], tiers: list[str], players_per_tier: int,
         except Exception:
             # One region failing must not stop the others or block publishing.
             log.exception("crawl failed for %s -- continuing", platform)
+            failed += 1
 
-    patch = current_patch(sqlite3.connect(db))
+    patch = current_patch(sqlite3.connect(db), tft_set=tft_set)
     if patch and state.get("patch") and patch != state["patch"]:
         removed = prune_old_patches(db, patch)
         log.warning("patch changed %s -> %s; pruned %d stale matches",
@@ -133,6 +137,7 @@ def cycle(platforms: list[str], tiers: list[str], players_per_tier: int,
         log.exception("publish failed -- previous build stays live")
 
     save_state(state)
+    return failed
 
 
 def main() -> None:
@@ -157,13 +162,20 @@ def main() -> None:
         while True:
             started = time.time()
             log.info("=== cycle start: %s ===", ", ".join(args.platforms))
-            cycle(args.platforms, args.tiers, args.players_per_tier,
-                  args.matches_per_player, args.lookback_days, args.db,
-                  args.tft_set, names)
+            failed = cycle(args.platforms, args.tiers, args.players_per_tier,
+                           args.matches_per_player, args.lookback_days, args.db,
+                           args.tft_set, names)
             elapsed = time.time() - started
             log.info("=== cycle done in %.1f min ===", elapsed / 60)
 
             if args.once:
+                # Every region failing is almost always the key (missing,
+                # revoked, regenerated) rather than Riot. The loop above
+                # swallows it so publishing still runs, which is right for a
+                # long-lived service but turns a scheduled CI run green while
+                # it does nothing -- so a one-shot run reports it.
+                if failed == len(args.platforms):
+                    raise SystemExit(f"all {failed} platform crawls failed -- check RIOT_API_KEY")
                 return
             sleep_for = max(0.0, args.interval_hours * 3600 - elapsed)
             log.info("sleeping %.1f h", sleep_for / 3600)

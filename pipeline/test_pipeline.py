@@ -17,6 +17,7 @@ import time
 
 from ingest import open_db
 from aggregate import build_stats, comp_signature, is_legend_augment
+from publish import current_patch
 
 random.seed(42)
 
@@ -151,6 +152,27 @@ def main() -> None:
     print(f"  Recovered planted comp ordering: {'PASS' if ok else 'FAIL'}")
     print(f"    expected {expected_order}")
     print(f"    observed {observed_order}")
+
+    check_set_rollover()
+
+
+def check_set_rollover() -> None:
+    """A new set's first patch must win over the old set's last one.
+
+    The old set's patch is newer-looking than nothing and far better sampled,
+    so a set-blind choice picks it -- and a build pinned to the new set then
+    filters to zero rows.
+    """
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE matches (match_id TEXT PRIMARY KEY, game_version TEXT, tft_set INTEGER)")
+    rows = [(f"old_{i}", "Linux Version 16.16.804.9184 (Aug 10 2026)", 17) for i in range(1500)]
+    rows += [(f"new_{i}", "Linux Version 16.19.812.1234 (Sep 21 2026)", 18) for i in range(300)]
+    conn.executemany("INSERT INTO matches VALUES (?,?,?)", rows)
+
+    got_new, got_old = current_patch(conn, tft_set=18), current_patch(conn, tft_set=17)
+    ok = got_new == "16.19" and got_old == "16.16"
+    print(f"  Patch chosen within the build's set at a set rollover: {'PASS' if ok else 'FAIL'}"
+          f" -> Set 18 {got_new}, Set 17 {got_old}")
 
 
 if __name__ == "__main__":

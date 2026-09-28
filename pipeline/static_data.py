@@ -20,10 +20,14 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import re
+import time
 from pathlib import Path
 
 import requests
+
+log = logging.getLogger("static_data")
 
 DDRAGON = "https://ddragon.leagueoflegends.com"
 CACHE = Path("ddragon_cache")
@@ -72,13 +76,39 @@ STAT_LABELS = {
 }
 
 
-def _fetch_cdragon_raw() -> dict:
-    if CDRAGON_CACHE.exists():
-        return json.loads(CDRAGON_CACHE.read_text())
-    raw = requests.get(CDRAGON_TFT_URL, timeout=60).json()
+# How long a CDragon download stays usable. Unlike Data Dragon, whose files are
+# cached under their version number, CDragon's URLs point at "latest" -- so a
+# cache that never expires pins every catalogue to whatever was live the day it
+# was written. Across a set rollover that is the wrong set entirely: live_set()
+# falls back to the highest set in the stale file, and a Set 18 build ships the
+# Set 17 roster, traits, augments and planner codes without any error.
+CDRAGON_MAX_AGE = 24 * 3600
+
+
+def _cached_json(path: Path, url: str) -> dict:
+    """A CDragon file, refetched once the cached copy is older than a day.
+
+    A failed refetch falls back to the stale copy: slightly old reference data
+    beats a build that loses its catalogues because CDragon had a bad minute.
+    """
+    if path.exists() and time.time() - path.stat().st_mtime < CDRAGON_MAX_AGE:
+        return json.loads(path.read_text())
+    try:
+        r = requests.get(url, timeout=60)
+        r.raise_for_status()
+        raw = r.json()
+    except (requests.RequestException, ValueError):
+        if path.exists():
+            log.warning("refetch of %s failed; using the cached copy", url)
+            return json.loads(path.read_text())
+        raise
     CACHE.mkdir(exist_ok=True)
-    CDRAGON_CACHE.write_text(json.dumps(raw))
+    path.write_text(json.dumps(raw))
     return raw
+
+
+def _fetch_cdragon_raw() -> dict:
+    return _cached_json(CDRAGON_CACHE, CDRAGON_TFT_URL)
 
 
 # The in-game Team Planner accepts a share code, so a comp can be loaded into
@@ -96,12 +126,7 @@ TEAMPLANNER_CACHE = CACHE / "tft_teamplanner.json"
 
 def team_planner_codes(set_number: int | str | None = None) -> dict[str, int]:
     """{character_id: team planner code} for one set."""
-    if TEAMPLANNER_CACHE.exists():
-        raw = json.loads(TEAMPLANNER_CACHE.read_text())
-    else:
-        raw = requests.get(CDRAGON_TEAMPLANNER_URL, timeout=60).json()
-        CACHE.mkdir(exist_ok=True)
-        TEAMPLANNER_CACHE.write_text(json.dumps(raw))
+    raw = _cached_json(TEAMPLANNER_CACHE, CDRAGON_TEAMPLANNER_URL)
 
     key = f"TFTSet{set_number}" if set_number is not None else None
     if key not in raw:

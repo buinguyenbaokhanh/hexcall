@@ -13,13 +13,14 @@ ladder (tft-league-v1) → puuids → match ids (tft-match-v1) → match json
 pip install requests
 export RIOT_API_KEY=RGAPI-...          # developer.riotgames.com
 python ingest.py --platform na1 --tiers challenger grandmaster --lookback-days 3
-python aggregate.py --db tft.db --set 17 --out stats.json
+python aggregate.py --db tft.db --set 18 --out stats.json
 ```
 
-Personal keys expire every 24 hours and are rate limited to ~20 req/s and
-100 req/2min. `riot_client.py` enforces those budgets and backs off on 429s.
-For continuous crawling you need a production key, which requires Riot to
-review a working prototype — the UI you already have is what you show them.
+Development keys expire every 24 hours; the registered HexCall personal key
+does not. Both are rate limited to 20 req/s and 100 req/2min, and
+`riot_client.py` enforces those budgets and backs off on 429s. That is enough
+for the daily three-region crawl in `.github/workflows/crawl.yml`; anything much
+heavier needs a production key.
 
 ## Files
 
