@@ -68,6 +68,31 @@ function StatusBanner({ status, error, onRetry }) {
   );
 }
 
+// The crawl runs daily, so a build this old means it has stopped -- and past
+// this point the numbers can easily describe a patch, or a whole set, that is
+// no longer live. The feed loading fine says nothing about that, so it gets its
+// own warning rather than hiding behind the "live" dot.
+const STALE_AFTER_DAYS = 7;
+
+function StaleBanner({ generatedAt, tftSet, patch }) {
+  if (!generatedAt) return null;
+  const days = Math.floor((Date.now() / 1000 - generatedAt) / 86400);
+  if (days < STALE_AFTER_DAYS) return null;
+  const from = [tftSet && `Set ${tftSet}`, patch && `patch ${patch}`].filter(Boolean).join(", ");
+  return (
+    <div className="flex items-start gap-2 text-[11.5px] rounded px-3 py-2 border mb-4"
+         style={{ color: "var(--warn)",
+                  borderColor: "color-mix(in srgb, var(--warn) 20%, transparent)",
+                  background: "color-mix(in srgb, var(--warn) 4%, transparent)" }}>
+      <AlertTriangle size={13} className="mt-[2px] shrink-0" />
+      <span className="flex-1">
+        These stats were published {days} days ago{from && ` (${from})`} and haven't been
+        refreshed since. They may describe an earlier patch or set than the one you're playing.
+      </span>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
 function useStatsFeed() {
@@ -232,7 +257,7 @@ export default function App() {
               <span title={stats.patch_label && stats.patch_label !== stats.patch
                              ? `TFT patch ${stats.patch_label} · client build ${stats.patch}`
                              : `client build ${stats.patch}`}>
-                patch {stats.patch_label || stats.patch || "—"}
+                {manifest?.tft_set && `Set ${manifest.tft_set} · `}patch {stats.patch_label || stats.patch || "—"}
               </span>
               {" · "}{stats.sample_size.toLocaleString()} boards · {timeAgo(stats.generated_at)}
               {status === "live" && <span style={{ color: "var(--signal)" }}> · live</span>}
@@ -316,6 +341,10 @@ export default function App() {
       <main role="tabpanel" aria-labelledby={`tab-${tab}`}
             className="max-w-[1180px] mx-auto px-6 py-6">
         <StatusBanner status={status} error={error} onRetry={() => setSlice(sliceId)} />
+        {status === "live" && (
+          <StaleBanner generatedAt={stats.generated_at} tftSet={manifest?.tft_set}
+                       patch={stats.patch_label || stats.patch} />
+        )}
 
         {tab === "advisor" && (
           <Advisor stats={stats} augmentMeta={augmentMeta} itemMeta={itemMeta}

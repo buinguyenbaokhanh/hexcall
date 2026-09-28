@@ -1,10 +1,9 @@
 # Deploy the site from data already committed to the repo.
 #
-# Separate from crawl.yml on purpose. That workflow crawls, publishes and
-# deploys in one job, which means a deploy can only ever be as good as a single
-# CI crawl -- and a single crawl on a development key does not reach the
-# publish threshold, so it produces an empty site. Crawling happens locally
-# where the match store accumulates across runs; this only ships the result.
+# This is the only workflow that deploys. crawl.yml refreshes data/, commits it
+# and then dispatches this one, so a stats refresh and a code change go out the
+# same way: the committed app plus the committed data. A local crawl works too
+# -- scripts/stage-data.sh, commit data/, push.
 #
 # It needs no Riot API key, so it is safe to run at any time.
 

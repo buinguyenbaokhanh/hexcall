@@ -1,30 +1,47 @@
-# Scheduled crawl + publish, no server required.
+# Scheduled crawl -> publish -> commit data/ -> deploy.
 #
-# IMPORTANT: this needs a PRODUCTION Riot API key. Personal keys expire every
-# 24 hours, so automation will start failing on day two. Run the crawler by hand
-# on your own machine until you're approved for a production key.
+# Runs on the registered HexCall product key (developer portal app 870684).
+# Unlike a development key it does not expire, which is what makes an
+# unattended schedule possible. Its rate limits are the same as a development
+# key's, though -- 20 requests/second and 100 requests/2 minutes -- so the
+# crawl below is sized to that budget rather than to a production key's.
 #
-# Setup:
+# Setup (once):
 #   1. Repo Settings -> Secrets and variables -> Actions -> New repository secret
-#      Name: RIOT_API_KEY   Value: RGAPI-...
-#   2. Settings -> Pages -> Source: "GitHub Actions"
-#   3. The published stats land at https://<you>.github.io/<repo>/data/
+#      Name: RIOT_API_KEY   Value: the RGAPI-... key from the developer portal
+#   2. Settings -> Pages -> Source: "GitHub Actions" (already set for deploy.yml)
+#
+# Where the data goes. The live site is always built from the data/ committed
+# to the repo (deploy.yml). This job refreshes data/ and commits it, so a crawl
+# and a code push can never deploy different data: whichever runs, the site is
+# the committed app plus the committed stats. A push made with the workflow's
+# own token does not trigger other workflows, so the deploy is dispatched
+# explicitly at the end.
+#
+# The match store does not live in the repo. It is carried between runs in the
+# Actions cache, keyed by set, so stats accumulate across runs within a set and
+# the first run of a new set starts clean instead of dragging the old roster in.
 
 name: crawl-and-publish
 
 on:
-  # The schedule is deliberately OFF. It needs a production key: development
-  # keys expire every 24 hours, so a scheduled crawl fails from day two and
-  # every run after that is noise. Re-enable this line once you are approved.
-  #
-  # schedule:
-  #   - cron: "0 */6 * * *"   # every 6 hours
-  workflow_dispatch:         # lets you trigger it manually from the Actions tab
+  schedule:
+    # Daily. A patch needs MIN_PATCH_MATCHES (1,200) before the build switches
+    # to it, and one run at the settings below stores well over that, so a
+    # daily crawl picks up a new patch the day after it lands. More often buys
+    # little at this rate limit and adds a data commit each time.
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+
+env:
+  # The TFT set to crawl and publish. Set 18 (Enchanted Wilds) went live with
+  # patch 18.1 on 2026-08-26. Change this when the next set launches; the cache
+  # key follows it, so the new set gets a fresh match store automatically.
+  TFT_SET: "18"
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write   # commit the refreshed data/
+  actions: write    # dispatch deploy.yml
 
 concurrency:
   group: crawl
@@ -33,7 +50,7 @@ concurrency:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
 
@@ -41,66 +58,107 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: pipeline/requirements.txt
 
       - run: pip install -r pipeline/requirements.txt
 
-      # Reuse the match store between runs so stats build up over time instead
-      # of starting from zero every crawl.
+      - name: Check the API key is configured
+        env:
+          RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
+        run: |
+          if [ -z "$RIOT_API_KEY" ]; then
+            echo "::error::RIOT_API_KEY secret is not set -- add it under Settings -> Secrets and variables -> Actions"
+            exit 1
+          fi
+
+      # The journal travels with the database: if a crawl is ever cut off
+      # mid-write, SQLite needs it to roll the half-written transaction back.
+      # The scheduler state is what lets the next run notice a patch change
+      # and prune the previous patch's matches.
       - name: Restore match store
         uses: actions/cache/restore@v4
         with:
-          path: pipeline/tft.db
-          key: tft-db-${{ github.run_id }}
-          restore-keys: tft-db-
+          path: |
+            pipeline/tft.db
+            pipeline/tft.db-journal
+            pipeline/scheduler_state.json
+          key: tft-db-set${{ env.TFT_SET }}-${{ github.run_id }}
+          restore-keys: tft-db-set${{ env.TFT_SET }}-
 
+      # Roughly 600 ladder players across the three regions the site
+      # publishes. Matches already in the store cost nothing, so after the
+      # first run of a set most of the budget goes on new games. At 100
+      # requests / 2 minutes that is typically well under an hour; the step
+      # timeout leaves room for a cold store without letting a stuck run eat
+      # the job's whole allowance before the store is saved.
       - name: Crawl and publish
         working-directory: pipeline
+        timeout-minutes: 150
         env:
           RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
         run: |
           python scheduler.py --once \
-            --platforms na1 euw1 \
+            --platforms na1 euw1 sg2 \
             --tiers challenger grandmaster \
             --players-per-tier 100 \
             --matches-per-player 20 \
             --lookback-days 3 \
-            --set 17
+            --set "$TFT_SET"
 
       - name: Save match store
         uses: actions/cache/save@v4
         if: always()
         with:
-          path: pipeline/tft.db
-          key: tft-db-${{ github.run_id }}
+          path: |
+            pipeline/tft.db
+            pipeline/tft.db-journal
+            pipeline/scheduler_state.json
+          key: tft-db-set${{ env.TFT_SET }}-${{ github.run_id }}
 
-      # A project Page is served from /<repo>/, so the bundle needs that base
-      # and the app has to read the published JSON directly -- there is no
-      # stats server on Pages, so the default /api calls would 404 (actually
-      # worse: they'd return index.html and fail to parse).
-      - name: Build web app
-        working-directory: app
+      # A run that published nothing (too few matches yet for any slice to
+      # clear its floor) leaves data/ exactly as it is: the previous build stays
+      # live, and the site's header already says how old it is.
+      - name: Stage published data
+        id: stage
+        run: |
+          if [ ! -e pipeline/public/current/manifest.json ]; then
+            echo "::warning::no build was published this run -- data/ left unchanged"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          scripts/stage-data.sh
+          git add -A data
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit data
+        if: steps.stage.outputs.changed == 'true' && github.ref_name == github.event.repository.default_branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          msg=$(python3 - <<'PY'
+          import json
+          m = json.load(open("data/manifest.json"))
+          label = m.get("patch_label") or m.get("patch")
+          head = f"Crawl Set {m.get('tft_set')} patch {label}"
+          if m.get("patch_label") and m["patch_label"] != m.get("patch"):
+              head += f" (build {m['patch']})"
+          lines = [f"{s['id']}: {s['sample_size']:,} boards, {s['comps']} comps" for s in m["slices"]]
+          print(head + "\n\n" + "\n".join(lines))
+          PY
+          )
+          git commit -m "$msg"
+          # Pick up anything pushed while the crawl ran. Only data/ changes
+          # here, so this rebases cleanly unless someone else also committed
+          # data/ in the meantime -- in which case failing is correct.
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin HEAD:"$GITHUB_REF_NAME"
+
+      - name: Deploy
+        if: steps.stage.outputs.changed == 'true' && github.ref_name == github.event.repository.default_branch
         env:
-          VITE_BASE: /${{ github.event.repository.name }}/
-          VITE_STATIC_MODE: "true"
-        run: |
-          npm ci
-          npm run build
-
-      - name: Assemble site
-        run: |
-          mkdir -p site
-          cp -r app/dist/* site/
-          mkdir -p site/data
-          cp -rL pipeline/public/current/* site/data/
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-  deploy:
-    needs: crawl
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-    steps:
-      - uses: actions/deploy-pages@v4
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy.yml --ref "$GITHUB_REF_NAME"

@@ -64,7 +64,7 @@ SLICES = [
     {"id": "kr-apex",        "label": "KR Challenger + GM",      "platform": "kr", "tiers": ["CHALLENGER", "GRANDMASTER"]},
     # SEA. sg2 is the Singapore platform and routes to the `sea` match cluster,
     # not `asia` -- see PLATFORM_TO_REGION. Crawl it with
-    # `./run-crawl.sh sg2 17`; until then these skip on sample like any other
+    # `./run-crawl.sh sg2 18`; until then these skip on sample like any other
     # slice, which costs nothing.
     {"id": "sg2-apex",       "label": "SEA Challenger + GM",     "platform": "sg2", "tiers": ["CHALLENGER", "GRANDMASTER"]},
     {"id": "sg2-all",        "label": "SEA, all ranks",          "platform": "sg2", "tiers": None},
@@ -119,12 +119,18 @@ _PATCH_RE = re.compile(r"(\d+)\.(\d+)")
 MIN_PATCH_MATCHES = 1200
 
 
-def patch_counts(conn: sqlite3.Connection) -> dict[tuple[int, int], int]:
-    """{(major, minor): matches} across the whole store."""
+def _set_clause(tft_set: int | None) -> tuple[str, tuple]:
+    return (" AND tft_set = ?", (tft_set,)) if tft_set is not None else ("", ())
+
+
+def patch_counts(conn: sqlite3.Connection,
+                 tft_set: int | None = None) -> dict[tuple[int, int], int]:
+    """{(major, minor): matches}, across the whole store or within one set."""
+    clause, params = _set_clause(tft_set)
     counts: dict[tuple[int, int], int] = {}
     for gv, n in conn.execute(
             "SELECT game_version, COUNT(*) FROM matches "
-            "WHERE game_version IS NOT NULL GROUP BY game_version"):
+            f"WHERE game_version IS NOT NULL{clause} GROUP BY game_version", params):
         m = _PATCH_RE.search(gv)
         if not m:
             continue
@@ -134,7 +140,8 @@ def patch_counts(conn: sqlite3.Connection) -> dict[tuple[int, int], int]:
 
 
 def current_patch(conn: sqlite3.Connection,
-                  min_matches: int = MIN_PATCH_MATCHES) -> str | None:
+                  min_matches: int = MIN_PATCH_MATCHES,
+                  tft_set: int | None = None) -> str | None:
     """The newest patch that holds enough matches to publish a usable build.
 
     Newest rather than most-sampled, but gated on sample. Un-gated "newest"
@@ -154,8 +161,15 @@ def current_patch(conn: sqlite3.Connection,
     stand on its own. If nothing clears the floor -- a fresh store, or the first
     crawl of a new set -- fall back to the best-sampled patch so the build
     produces something rather than refusing.
+
+    Pass tft_set whenever the build is pinned to one. Counted across the whole
+    store, the first days of a new set lose to the old set's last patch: a
+    store holding thousands of 16.16 (Set 17) matches and a few hundred on Set
+    18 returns 16.16, the build then filters to "Set 18 AND 16.16", matches
+    zero rows, and publishes nothing until one Set 18 patch clears the floor on
+    its own -- the fallback below never gets a chance to run.
     """
-    counts = patch_counts(conn)
+    counts = patch_counts(conn, tft_set)
     if not counts:
         return None
     for key in sorted(counts, reverse=True):
@@ -341,18 +355,21 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
             patch: str | None = None) -> Path:
     conn = sqlite3.connect(db_path)
     forced = patch is not None
-    patch = patch or current_patch(conn)
+    patch = patch or current_patch(conn, tft_set=tft_set)
     if patch:
         # Which patch was chosen and why. A build silently one patch behind is
         # the kind of thing you only notice after acting on it, so the newer
         # patch and how close it is to taking over are logged every run.
-        counts = patch_counts(conn)
-        n_patch = conn.execute("SELECT COUNT(*) FROM matches WHERE game_version LIKE ?",
-                               (patch_filter(patch),)).fetchone()[0]
-        n_all = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
-        log.info("building for patch %s%s: %d of %d stored matches (%.0f%%)",
-                 patch, " (forced)" if forced else "",
-                 n_patch, n_all, 100 * n_patch / max(n_all, 1))
+        counts = patch_counts(conn, tft_set)
+        clause, params = _set_clause(tft_set)
+        n_patch = conn.execute("SELECT COUNT(*) FROM matches WHERE game_version LIKE ?" + clause,
+                               (patch_filter(patch), *params)).fetchone()[0]
+        n_all = conn.execute("SELECT COUNT(*) FROM matches WHERE 1=1" + clause,
+                             params).fetchone()[0]
+        log.info("building for patch %s%s: %d of %d stored %smatches (%.0f%%)",
+                 patch, " (forced)" if forced else "", n_patch, n_all,
+                 f"Set {tft_set} " if tft_set is not None else "",
+                 100 * n_patch / max(n_all, 1))
 
         newest = max(counts, default=None)
         if newest and f"{newest[0]}.{newest[1]}" != patch:
