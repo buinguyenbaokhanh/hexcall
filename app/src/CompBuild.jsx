@@ -4,7 +4,15 @@ import { ChampionIcon, ItemIcon, AugmentIcon } from "./icons.jsx";
 import { TraitBadge } from "./TraitBadge.jsx";
 import { HoverCard } from "./HoverCard.jsx";
 
-const short = (id = "") => id.replace(/^TFT\d*_(Item_)?/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+// Fallback label for an id with no resolved name. Set ids carry their set in
+// one of three shapes -- "TFT17_Akali", and from Set 18 "DA_18_Alistar" or
+// "DA_Vi18" -- so strip whichever is there.
+const short = (id = "") => id
+  .replace(/^TFT\d*_(Item_)?/, "")
+  .replace(/^DA_\d+_/, "")
+  .replace(/^DA_([A-Za-z]+?)\d+(?=_|$)/, "$1")
+  .replace(/^DA_/, "")
+  .replace(/([a-z0-9])([A-Z])/g, "$1 $2");
 
 const RARITY = { Silver: "#9FB0C4", Gold: "#F0B429", Prismatic: "#8FE3D2" };
 const RARITY_ORDER = ["Silver", "Gold", "Prismatic"];
