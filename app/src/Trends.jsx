@@ -205,7 +205,6 @@ export default function Trends({ stats, apiBase, staticMode, sliceId, traitMeta 
   if (status === "error" || !data?.days?.length) {
     return (
       <div>
-        <PageHeader title="TFT Trends" blurb="How the meta moved, day by day." />
         <div className="flex items-start gap-2 text-[12px] rounded px-3 py-2.5 border"
              style={{ color: "var(--warn)", borderColor: "var(--warn)33", background: "var(--warn)0A" }}>
           <AlertTriangle size={13} className="mt-[2px] shrink-0" />
@@ -224,10 +223,7 @@ export default function Trends({ stats, apiBase, staticMode, sliceId, traitMeta 
 
   return (
     <div>
-      <PageHeader
-        title="TFT Trends"
-        blurb={`How each ${kind.replace(/s$/, "")} moved over the last ${data.days.length} days. Days are bucketed by when the match was played, not when it was crawled, and a day below the sample floor is left out rather than drawn.`}
-        sampleSize={stats.sample_size} generatedAt={data.generated_at}>
+      <PageHeader title="Daily Performance">
         <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
           {first} → {last} · {num(Object.values(data.day_samples).reduce((a, b) => a + b, 0))} boards across the window
         </p>

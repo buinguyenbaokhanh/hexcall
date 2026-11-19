@@ -30,12 +30,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sqlite3
 import time
 from pathlib import Path
 
 from ingest import crawl
-from publish import publish, current_patch, patch_filter
+from publish import publish
 
 log = logging.getLogger("scheduler")
 LOCK = Path("scheduler.lock")
@@ -71,67 +70,29 @@ def save_state(s: dict) -> None:
     STATE.write_text(json.dumps(s, indent=2))
 
 
-def prune_old_patches(db: str, keep_patch: str) -> int:
-    """Drop matches from previous patches.
-
-    This is deliberate, not just housekeeping: after a balance patch the old
-    data describes a game that no longer exists. Keeping it inflates your
-    sample size while degrading accuracy, which is the worst trade available.
-
-    Uses publish.patch_filter for the pattern. Building it inline here is what
-    destroyed a 2,920-match store once already: live game_version reads
-    "Linux Version 16.16.804.9184 (...)", so a literal "Version 16.16.%"
-    prefix matched nothing, NOT LIKE therefore matched everything, and the
-    prune deleted the entire table the first time the detected patch changed.
-
-    The guard below is the real protection. A prune that would remove
-    everything is always a bug in the pattern rather than a genuine state --
-    even a total patch rollover leaves the matches just crawled on the new
-    one -- so it refuses instead of emptying the store.
-    """
-    conn = sqlite3.connect(db)
-    total = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
-    keeping = conn.execute("SELECT COUNT(*) FROM matches WHERE game_version LIKE ?",
-                           (patch_filter(keep_patch),)).fetchone()[0]
-    if total and keeping == 0:
-        log.error("refusing to prune: no match would survive keep_patch=%r "
-                  "(pattern %r matched 0 of %d rows) -- check game_version parsing",
-                  keep_patch, patch_filter(keep_patch), total)
-        return 0
-    cur = conn.execute("DELETE FROM matches WHERE game_version NOT LIKE ?",
-                       (patch_filter(keep_patch),))
-    conn.commit()
-    return cur.rowcount
-
-
 def cycle(platforms: list[str], tiers: list[str], players_per_tier: int,
           matches_per_player: int, lookback_days: int, db: str,
           tft_set: int | None, comp_names: dict | None) -> None:
     state = load_state()
 
+    crawled = False
     for platform in platforms:
         try:
             crawl(platform, tiers, players_per_tier, matches_per_player,
                   lookback_days, Path(db))
+            crawled = True
         except Exception:
             # One region failing must not stop the others or block publishing.
             log.exception("crawl failed for %s -- continuing", platform)
 
-    patch = current_patch(sqlite3.connect(db))
-    if patch and state.get("patch") and patch != state["patch"]:
-        removed = prune_old_patches(db, patch)
-        log.warning("patch changed %s -> %s; pruned %d stale matches",
-                    state["patch"], patch, removed)
-    state["patch"] = patch
-
-    try:
-        out = publish(db, tft_set, comp_names)
-        state["last_publish"] = int(time.time())
-        state["last_build"] = out.name
-        log.info("published build %s", out.name)
-    except Exception:
-        log.exception("publish failed -- previous build stays live")
-
+    if not crawled:
+        raise RuntimeError("all requested region crawls failed")
+    # Publishing already isolates the selected patch. Keep historical matches
+    # for Trends and avoid deleting unnumbered games during a set rollover.
+    out = publish(db, tft_set, comp_names)
+    state["last_publish"] = int(time.time())
+    state["last_build"] = out.name
+    log.info("published build %s", out.name)
     save_state(state)
 
 
@@ -157,9 +118,14 @@ def main() -> None:
         while True:
             started = time.time()
             log.info("=== cycle start: %s ===", ", ".join(args.platforms))
-            cycle(args.platforms, args.tiers, args.players_per_tier,
-                  args.matches_per_player, args.lookback_days, args.db,
-                  args.tft_set, names)
+            try:
+                cycle(args.platforms, args.tiers, args.players_per_tier,
+                      args.matches_per_player, args.lookback_days, args.db,
+                      args.tft_set, names)
+            except Exception:
+                if args.once:
+                    raise
+                log.exception("cycle failed; keeping the last published build")
             elapsed = time.time() - started
             log.info("=== cycle done in %.1f min ===", elapsed / 60)
 

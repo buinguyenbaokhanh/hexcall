@@ -228,7 +228,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
     return (
       <div className="max-w-[760px]">
         <div className="rounded-lg border p-4" style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
-          <h2 className="display text-[13px] mb-1">Review your recent games</h2>
+          <h2 className="display text-[13px] mb-1">Review Your Recent Games</h2>
           <p className="text-[12px] leading-relaxed" style={{ color: "var(--dim)" }}>
             This feature needs the stats server running, because it looks up your match history
             from Riot at request time — the rest of the app reads pre-published files and works
@@ -243,7 +243,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
     <div className="max-w-[900px]">
       <div className="rounded-lg border p-4 mb-5"
            style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
-        <h2 className="display text-[13px] mb-1">Review your recent games</h2>
+        <h2 className="display text-[13px] mb-1">Review Your Recent Games</h2>
         <p className="text-[12px] leading-relaxed mb-3" style={{ color: "var(--dim)" }}>
           Compares your last 20 ranked games against the aggregate to find the mistakes you
           repeat. A tier list tells you what's strong; this tells you what you're doing wrong.
@@ -293,7 +293,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
       {data?.queues?.length > 0 && (
         <div className="flex items-center gap-1 flex-wrap mb-4 border-b pb-2"
              style={{ borderColor: "var(--line)" }}>
-          {[{ id: "all", label: "All queues", games: data.examined },
+          {[{ id: "all", label: "All Queues", games: data.examined },
             ...data.queues.map((q) => ({ ...q, id: String(q.id) }))].map((q) => (
             <button key={q.id} onClick={() => setQueue(q.id)}
                     className="display text-[12.5px] px-3 py-1.5 rounded-t border-b-2 whitespace-nowrap transition-colors disabled:opacity-50"
@@ -348,7 +348,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
 
           <div className="rounded-lg border p-4 mb-4" style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
             <div className="flex items-baseline justify-between mb-3 gap-4 flex-wrap">
-              <span className="display text-[13px]">Your average placement</span>
+              <span className="display text-[13px]">Your Average Placement</span>
               <span className="flex items-baseline gap-2">
                 <span className="mono text-[26px]"
                       style={{ color: !qview.field_comparable ? "var(--text)"
@@ -483,7 +483,7 @@ export default function Review({ apiBase, sliceId, staticMode, traitMeta = {} })
                 </p>
               )}
 
-              <h3 className="display text-[13px] mb-2.5">Everything measured</h3>
+              <h3 className="display text-[13px] mb-2.5">Performance Metrics</h3>
               <div className="space-y-2">
                 {qview.leaks.map((leak) => <LeakCard key={leak.id} leak={leak} />)}
               </div>

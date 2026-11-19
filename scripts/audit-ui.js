@@ -27,8 +27,7 @@
 (async () => {
   const WCAG_NORMAL = 4.5;   // AA, body text
   const WCAG_LARGE = 3.0;    // AA, >=24px or >=18.66px bold
-  const TABS = ["Advisor", "Items I hold", "Comps", "Augments", "Units",
-                "Items", "Traits", "Trends", "Review My Games"];
+  const links = [...document.querySelectorAll('.section-links a[href^="#/"]')];
 
   const srgb = (v) => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   const lum = ([r, g, b]) => 0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(b);
@@ -52,8 +51,6 @@
     return getComputedStyle(document.body).backgroundColor;
   };
 
-  const byText = (t) => [...document.querySelectorAll("button")]
-    .find((b) => b.textContent.trim() === t);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // A collapsed or hidden pane reports clientWidth 0, which makes every element
@@ -68,10 +65,9 @@
   const overflow = {};
   let imgs = 0, broken = 0, noAlt = 0, nodes = 0;
 
-  for (const tab of TABS) {
-    const b = byText(tab);
-    if (!b) continue;
-    b.click();
+  for (const link of links) {
+    const tab = link.textContent.trim();
+    link.click();
     await sleep(900);   // let images load and the table paint
 
     const tabImgs = [...document.querySelectorAll("main img")];
@@ -123,9 +119,9 @@
     "h1 present": document.querySelectorAll("h1").length === 1,
     "landmarks (main/nav/header)": !!document.querySelector("main")
       && !!document.querySelector("nav") && !!document.querySelector("header"),
-    "tabs use role=tablist": !!document.querySelector('[role="tablist"]'),
-    "tabs expose aria-selected": document.querySelectorAll('[role="tab"][aria-selected]').length > 0,
-    "tabpanel labelled": !!document.querySelector('[role="tabpanel"][aria-labelledby]'),
+    "all sections linked": links.length === 9,
+    "active page marked": links.filter((link) => link.getAttribute("aria-current") === "page").length === 1,
+    "main labelled": !!document.querySelector("main[aria-labelledby]"),
     "html lang set": !!document.documentElement.lang,
     "visible focus ring": !!hasRing,
     "images all load": broken === 0,
@@ -133,7 +129,7 @@
     "no page overflow": Object.values(overflow).every((v) => !v),
   };
 
-  console.log(`%cHexCall UI audit — ${nodes} text nodes, ${imgs} images, ${TABS.length} tabs`,
+  console.log(`%cHexCall UI audit — ${nodes} text nodes, ${imgs} images, ${links.length} tabs`,
               "font-weight:bold;font-size:13px");
   console.table(structure);
   if (contrast.size) {

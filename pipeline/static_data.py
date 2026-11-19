@@ -33,14 +33,7 @@ CACHE = Path("ddragon_cache")
 # values, no crafting recipe. CDragon's bundle has all three, keyed by the
 # same "TFT_Item_..." apiName the match API and Data Dragon both use, so it
 # joins cleanly onto the resolver without any fuzzy matching.
-CDRAGON_TFT_URL = "https://raw.communitydragon.org/latest/cdragon/tft/en_us.json"
-CDRAGON_CACHE = CACHE / "cdragon_tft.json"
-
-# CDragon references game assets by their internal path ("ASSETS/Characters/
-# .../Foo.tex"). The served copy is lowercased and transcoded to PNG under
-# /latest/game/, so this turns an internal path into a fetchable URL. Used for
-# champion ability icons, which Data Dragon does not publish at all.
-CDRAGON_ASSET_BASE = "https://raw.communitydragon.org/latest/game/"
+CDRAGON = "https://raw.communitydragon.org"
 
 # Item description templates reference stat values as "@FieldName@" or
 # "@FieldName*100@", where FieldName is a key in the item's own `effects`
@@ -72,12 +65,16 @@ STAT_LABELS = {
 }
 
 
-def _fetch_cdragon_raw() -> dict:
-    if CDRAGON_CACHE.exists():
-        return json.loads(CDRAGON_CACHE.read_text())
-    raw = requests.get(CDRAGON_TFT_URL, timeout=60).json()
+def _community_json(version: str, resource: str, filename: str) -> dict:
+    build = ".".join(version.split(".")[:2])
+    cached = CACHE / f"{build}_{filename}.json"
+    if cached.exists():
+        return json.loads(cached.read_text())
+    response = requests.get(f"{CDRAGON}/{build}/{resource}", timeout=60)
+    response.raise_for_status()
+    raw = response.json()
     CACHE.mkdir(exist_ok=True)
-    CDRAGON_CACHE.write_text(json.dumps(raw))
+    cached.write_text(json.dumps(raw))
     return raw
 
 
@@ -87,28 +84,16 @@ def _fetch_cdragon_raw() -> dict:
 # write-ups describe deriving it by sorting the roster alphabetically, and that
 # ordering does not match the published values (Set 17 assigns Briar 14 and
 # Miss Fortune 1, which no alphabetical sort produces).
-CDRAGON_TEAMPLANNER_URL = (
-    "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/"
-    "global/default/v1/tftchampions-teamplanner.json"
-)
-TEAMPLANNER_CACHE = CACHE / "tft_teamplanner.json"
-
-
-def team_planner_codes(set_number: int | str | None = None) -> dict[str, int]:
-    """{character_id: team planner code} for one set."""
-    if TEAMPLANNER_CACHE.exists():
-        raw = json.loads(TEAMPLANNER_CACHE.read_text())
-    else:
-        raw = requests.get(CDRAGON_TEAMPLANNER_URL, timeout=60).json()
-        CACHE.mkdir(exist_ok=True)
-        TEAMPLANNER_CACHE.write_text(json.dumps(raw))
-
-    key = f"TFTSet{set_number}" if set_number is not None else None
-    if key not in raw:
-        # Fall back to the highest set present, matching live_set's behaviour.
+def team_planner_codes(set_number: int | str | None = None, version: str | None = None) -> dict[str, int]:
+    """{character_id: team planner code} for the requested set."""
+    raw = _community_json(version or latest_version(),
+                          "plugins/rcp-be-lol-game-data/global/default/v1/tftchampions-teamplanner.json",
+                          "tft_teamplanner")
+    key = f"TFTSet{set_number}"
+    if set_number is None:
         keys = [k for k in raw if k.startswith("TFTSet") and k[6:].isdigit()]
         key = max(keys, key=lambda k: int(k[6:])) if keys else None
-    if not key:
+    if key not in raw:
         return {}
     return {c["character_id"]: c["team_planner_code"] for c in raw[key]
             if c.get("character_id") and c.get("team_planner_code")}
@@ -129,16 +114,17 @@ def team_planner_code(champion_ids: list[str], codes: dict[str, int],
     return f"01{body}TFTSet{set_number}"
 
 
-def cdragon_asset(path: str | None) -> str | None:
+def cdragon_asset(path: str | None, version: str) -> str | None:
     """Internal CDragon asset path -> fetchable PNG URL."""
-    if not path:
+    if not path or path.lower() == "none":
         return None
     p = path.lower()
     for ext in (".tex", ".dds"):
         if p.endswith(ext):
             p = p[: -len(ext)] + ".png"
             break
-    return CDRAGON_ASSET_BASE + p.lstrip("/")
+    build = ".".join(version.split(".")[:2])
+    return f"{CDRAGON}/{build}/game/" + p.lstrip("/")
 
 
 def live_set(raw: dict, set_number: int | str | None = None) -> dict:
@@ -158,6 +144,7 @@ def live_set(raw: dict, set_number: int | str | None = None) -> dict:
         for s in sets:
             if str(s["number"]) == str(set_number):
                 return s
+        return {}
     return max(sets, key=lambda s: int(s["number"]))
 
 
@@ -206,26 +193,6 @@ def _augment_rarity(entry: dict) -> int | None:
     if m:
         return _ROMAN[m.group(1)]
     return None
-
-
-def _fetch_cdragon_items() -> dict[str, dict]:
-    """{apiName: {name, desc, effects, composition}} for every TFT item CDragon
-    knows about, across all sets (a component like B.F. Sword is set-agnostic,
-    and a composition list may reference it regardless of what set is live)."""
-    raw = _fetch_cdragon_raw()
-    out = {}
-    for it in raw.get("items", []):
-        api_name = it.get("apiName")
-        if not api_name or it.get("isAugment"):
-            continue
-        out[api_name] = {
-            "name": it.get("name"),
-            "desc": it.get("desc") or "",
-            "effects": it.get("effects") or {},
-            "composition": it.get("composition") or [],
-            "icon": it.get("icon"),
-        }
-    return out
 
 
 def _fmt_stat(value: float) -> str:
@@ -349,6 +316,8 @@ def prettify_id(raw_id: str) -> str:
     alone -- title-casing them would turn 'LeBlanc' into 'Leblanc'.
     """
     s = re.sub(r"^TFT\d*_?(Augment_|Item_)?", "", raw_id, flags=re.I)
+    if raw_id.startswith("DA_"):
+        s = re.sub(r"^DA_(?:\d+_)?|(?<=[A-Za-z])\d+(?=_|$)", "", raw_id)
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", s)
     s = s.replace("_", " ").strip()
     return " ".join(w.capitalize() if w.islower() else w for w in s.split())
@@ -357,18 +326,42 @@ def prettify_id(raw_id: str) -> str:
 class NameResolver:
     """Maps raw API IDs -> display names, with a graceful fallback."""
 
-    def __init__(self, static: dict):
-        self.static = static
+    def __init__(self, static: dict, tft_set: int | None = None):
+        self.static = dict(static)
+        # Riot also keys records by a shop or item path. Match payloads use
+        # the final component. Prefer the selected set for shared IDs.
+        for table in ("champions", "items", "traits", "augments"):
+            entries = static.get(table, {})
+            by_id = {key.rsplit("/", 1)[-1]: value for key, value in entries.items()}
+            for key, value in entries.items():
+                if tft_set and f"TFTSet{tft_set}" in key.split("/"):
+                    by_id[key.rsplit("/", 1)[-1]] = value
+            self.static[table] = by_id
         self._misses: set[str] = set()
         self._lol_by_lower = {k.lower(): k for k in static.get("lol_champions", {})}
-        # Loaded lazily by item_icon() on the first Data Dragon miss; None
-        # means "not attempted yet", {} means "attempted and unavailable".
-        self._cdragon_items: dict[str, dict] | None = None
+        self.version = static["version"]
+        try:
+            raw = _community_json(self.version, "cdragon/tft/en_us.json", "cdragon_tft")
+        except (requests.RequestException, ValueError, OSError):
+            raw = {}
+        self.roster = live_set(raw, tft_set)
+        self.cd = {
+            "champions": {c["apiName"]: c for c in self.roster.get("champions", []) if c.get("apiName")},
+            "traits": {t["apiName"]: t for t in self.roster.get("traits", []) if t.get("apiName")},
+            "items": {}, "augments": {},
+        }
+        augment_ids = set(self.roster.get("augments") or [])
+        for item in raw.get("items", []):
+            key = item.get("apiName")
+            if key:
+                table = "augments" if item.get("isAugment") or key in augment_ids else "items"
+                self.cd[table][key] = item
 
     def _lookup(self, table: str, raw_id: str) -> str:
-        entry = self.static.get(table, {}).get(raw_id)
-        if entry and entry.get("name"):
-            return entry["name"]
+        for catalog in (self.static, self.cd):
+            name = catalog.get(table, {}).get(raw_id, {}).get("name")
+            if name:
+                return name
         self._misses.add(f"{table}:{raw_id}")
         return prettify_id(raw_id)
 
@@ -394,21 +387,14 @@ class NameResolver:
         as a blank grey square in the UI, so fall through to CDragon, which
         carries the same ids with its own art.
         """
-        icon = self.icon_url("items", raw_id)
-        if icon:
-            return icon
-        if self._cdragon_items is None:
-            try:
-                self._cdragon_items = _fetch_cdragon_items()
-            except Exception:
-                self._cdragon_items = {}
-        cd = self._cdragon_items.get(raw_id)
-        return cdragon_asset(cd.get("icon")) if cd else None
+        return self.icon_url("items", raw_id)
 
     def icon_url(self, table: str, raw_id: str) -> str | None:
         entry = self.static.get(table, {}).get(raw_id)
-        if not entry:
-            return None
+        if not (entry or {}).get("image", {}).get("full"):
+            cd = self.cd.get(table, {}).get(raw_id, {})
+            path = (cd.get("squareIcon") or cd.get("tileIcon")) if table == "champions" else cd.get("icon")
+            return cdragon_asset(path, self.version)
         folder = {"augments": "tft-augment", "champions": "tft-champion",
                   "items": "tft-item", "traits": "tft-trait"}[table]
         return f"{DDRAGON}/cdn/{self.static['version']}/img/{folder}/{entry['image']['full']}"
@@ -448,19 +434,16 @@ def build_item_meta(resolver: NameResolver) -> dict[str, dict]:
     CDragon miss (rate-limited, network down, item not in their bundle yet)
     degrades that one item to icon-only rather than failing the whole build.
     """
-    try:
-        cdragon = _fetch_cdragon_items()
-    except Exception:
-        cdragon = {}
-
-    # Union of both catalogues, not just Data Dragon's. Match data contains
-    # items Data Dragon's tft-item.json never lists -- Radiant variants
-    # (TFT5_Item_*Radiant), Artifacts, and set-specific items like Set 17's
-    # Anima Squad tier-2s. Iterating Data Dragon alone left those with no name,
-    # icon or description, so they surfaced in the UI as prettified ids
-    # ("Anima Squad Item Tier2 Annihilator") with blank tooltips.
+    cdragon = resolver.cd["items"]
+    ids = set(resolver.roster.get("items") or [])
+    if ids:
+        ids &= cdragon.keys() | resolver.static.get("items", {}).keys()
+        # Recipes can refer to a component absent from the set's item list.
+        ids.update(c for key in list(ids) for c in cdragon.get(key, {}).get("composition") or [])
+    else:
+        ids = resolver.static.get("items", {}).keys() | cdragon.keys()
     out = {}
-    for item_id in set(resolver.static.get("items", {})) | set(cdragon):
+    for item_id in sorted(ids):
         entry = {
             "name": resolver.item(item_id),
             "icon": resolver.item_icon(item_id),
@@ -472,11 +455,11 @@ def build_item_meta(resolver: NameResolver) -> dict[str, dict]:
             if item_id not in resolver.static.get("items", {}):
                 entry["name"] = cd["name"]
         if cd:
-            entry["description"] = render_description(cd["desc"], cd["effects"])
-            entry["stats"] = stat_rows(cd["effects"])
+            entry["description"] = render_description(cd.get("desc") or "", cd.get("effects") or {})
+            entry["stats"] = stat_rows(cd.get("effects") or {})
             entry["recipe"] = [
                 {"id": c, "name": resolver.item(c), "icon": resolver.item_icon(c)}
-                for c in cd["composition"]
+                for c in cd.get("composition") or []
             ]
         out[item_id] = entry
     return out
@@ -518,20 +501,14 @@ def build_trait_meta(resolver: NameResolver, set_number: int | str | None = None
     (1 bronze, 2 silver, 3 gold, 4 prismatic). The client picks the highest
     breakpoint a board actually hit to colour the badge the way the game does.
     """
-    try:
-        raw = _fetch_cdragon_raw()
-    except Exception:
-        raw = {}
-
-    cd_traits = {t["apiName"]: t for t in live_set(raw, set_number).get("traits", [])
-                 if t.get("apiName")}
+    cd_traits = resolver.cd["traits"]
     dd_traits = resolver.static.get("traits", {})
 
     out: dict[str, dict] = {}
     for api_name, cd in cd_traits.items():
         dd = dd_traits.get(api_name)
         name = (dd or {}).get("name") or cd.get("name")
-        icon = resolver.icon_url("traits", api_name) or cdragon_asset(cd.get("icon"))
+        icon = resolver.icon_url("traits", api_name)
         breakpoints = sorted(
             ({"units": e["minUnits"], "style": e.get("style", 0)}
              for e in cd.get("effects", []) if e.get("minUnits")),
@@ -560,16 +537,9 @@ def build_augment_meta(resolver: NameResolver, set_number: int | str | None = No
     offers plenty of "TFT10_..."/"TFT11_..." ids. Reading setData's own
     augment list rather than filtering ids by set prefix is what keeps those.
     """
-    try:
-        raw = _fetch_cdragon_raw()
-    except Exception:
-        raw = {}
-
-    pool = live_set(raw, set_number).get("augments") or []
-    by_api = {i["apiName"]: i for i in raw.get("items", [])
-              if i.get("isAugment") and i.get("apiName")}
-
-    live = live_set(raw, set_number)
+    live = resolver.roster
+    pool = live.get("augments") or []
+    by_api = resolver.cd["augments"]
     champ_names = {c["name"]: c["apiName"] for c in live.get("champions", [])
                    if c.get("name") and c.get("traits")}
     trait_names = {t["name"]: t["apiName"] for t in live.get("traits", []) if t.get("name")}
@@ -587,8 +557,6 @@ def build_augment_meta(resolver: NameResolver, set_number: int | str | None = No
             entry["rarity_rank"] = rank
             entry["description"] = render_description(cd.get("desc") or "", cd.get("effects") or {})
             entry["traits"] = cd.get("associatedTraits") or []
-            if not entry["icon"]:
-                entry["icon"] = cdragon_asset(cd.get("icon"))
 
         # What this augment is actually tied to. Riot publishes
         # associatedTraits for only 6 of the 274 augments in the pool, so the
@@ -663,13 +631,8 @@ def build_champion_meta(resolver: NameResolver, set_number: int | str | None = N
     fallback so a champion Data Dragon hasn't published still reads correctly
     rather than as a prettified id.
     """
-    try:
-        raw = _fetch_cdragon_raw()
-    except Exception:
-        raw = {}
-
     out = {}
-    for c in live_set(raw, set_number).get("champions", []):
+    for c in resolver.roster.get("champions", []):
         champ_id = c.get("apiName")
         if not champ_id or not c.get("traits"):
             continue
@@ -683,6 +646,7 @@ def build_champion_meta(resolver: NameResolver, set_number: int | str | None = N
             "cost": c.get("cost"),
             "role": role,
             "role_group": _role_group(role),
+            "attack_range": stats.get("range"),
             "traits": c.get("traits") or [],
             "stats": {
                 key: round(stats[src], 2)
@@ -695,7 +659,7 @@ def build_champion_meta(resolver: NameResolver, set_number: int | str | None = N
         if ability.get("name"):
             entry["ability"] = {
                 "name": ability["name"],
-                "icon": cdragon_asset(ability.get("icon")),
+                "icon": cdragon_asset(ability.get("icon"), resolver.version),
                 "description": render_description(
                     ability.get("desc") or "", _ability_effects(ability.get("variables"))),
             }

@@ -1,9 +1,10 @@
+import { pageLink, usePageQuery } from "./Navigation.jsx";
 import React, { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { ChampionIcon } from "./icons.jsx";
 import { TraitBadge } from "./TraitBadge.jsx";
 import { assignTiers, TierBadge } from "./tiers.jsx";
-import { useReportFocus, useIncomingNav } from "./focus.jsx";
+import { useReportFocus } from "./focus.jsx";
 import { PageHeader, SegmentedToggle, StatTable, Place, PlaceChange, Frequency, pct } from "./table.jsx";
 
 /**
@@ -34,10 +35,10 @@ function overallOf(breakpoints) {
  * hides which one you should actually be building toward.
  */
 export default function Traits({ stats, traitMeta, championMeta }) {
-  const [query, setQuery] = useState("");
   const [view, setView] = useState("overall");
   const [sort, setSort] = useState({ key: "place", dir: "asc" });
   const [expanded, setExpanded] = useState(() => new Set());
+  const [query, setQuery] = usePageQuery("traits");
 
   // Champions grouped by trait, from the champion catalogue rather than the
   // stats, so a trait shows its full roster even for units the crawl missed.
@@ -88,22 +89,19 @@ export default function Traits({ stats, traitMeta, championMeta }) {
     return rows.filter((r) => r.name.toLowerCase().includes(q));
   }, [rows, query]);
 
-  // The assistant links here; filter to whatever it was talking about rather
-  // than dropping the player at the top of a long table.
-  useIncomingNav("traits", setQuery);
-
   // Tell the assistant what's open, so a question can say "it" and resolve.
   const reportFocus = useReportFocus();
-  const toggle = (id) =>
-    setExpanded((p) => {
-      const n = new Set(p);
-      if (n.has(id)) { n.delete(id); reportFocus("trait", null); }
-      else { n.add(id); reportFocus("trait", rows.find((r) => r.id === id)?.name); }
-      return n;
-    });
+  const toggle = (id) => {
+    const next = new Set(expanded);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExpanded(next);
+    reportFocus("trait", next.has(id) ? rows.find((r) => r.id === id)?.name : null);
+  };
 
   const baseline = stats.baseline_placement;
 
+  const hasChange = Object.keys(stats.place_change?.traits || {}).length > 0;
   const columns = useMemo(() => {
     const cols = [
       {
@@ -173,8 +171,8 @@ export default function Traits({ stats, traitMeta, championMeta }) {
       cell: (t) => <Frequency n={t.n} rate={t.play_rate} />,
     });
 
-    return cols;
-  }, [baseline, view]);
+    return cols.filter((c) => hasChange || c.key !== "change");
+  }, [baseline, view, hasChange]);
 
   if (traits.length === 0) {
     return (
@@ -186,10 +184,7 @@ export default function Traits({ stats, traitMeta, championMeta }) {
 
   return (
     <div>
-      <PageHeader
-        title="TFT Trait Tier List"
-        blurb="Which synergies are carrying boards on this patch. Overall weights every breakpoint by how often it was actually hit; by level splits them out, since the highlighted breakpoint is the one worth building toward."
-        sampleSize={stats.sample_size} generatedAt={stats.generated_at}>
+      <PageHeader title="Synergy Ranking" blurb="Overall combines active levels. Choose By Level to compare individual breakpoints.">
         <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
           {traits.length} synergies measured in this slice
         </p>
@@ -197,7 +192,7 @@ export default function Traits({ stats, traitMeta, championMeta }) {
 
       <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
         <SegmentedToggle value={view} onChange={setView}
-                         options={[["overall", "Overall"], ["level", "By level"]]} />
+                         options={[["overall", "Overall"], ["level", "By Level"]]} />
         <div className="relative shrink-0">
           <Search size={12} className="absolute left-2.5 top-[9px]" style={{ color: "var(--dim)" }} />
           <input value={query} onChange={(e) => setQuery(e.target.value)}
@@ -263,14 +258,14 @@ export default function Traits({ stats, traitMeta, championMeta }) {
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {t.champions.map((c) => (
-                      <span key={c.id} className="flex items-center gap-1.5 rounded-lg border px-2 py-1"
+                      <a key={c.id} href={pageLink("champions", c.name)} className="row-hover flex items-center gap-1.5 rounded-lg border px-2 py-1"
                             style={{ borderColor: "var(--line)" }}>
                         <ChampionIcon src={c.icon} name={c.name} size={22} />
                         <span className="text-[11.5px]">{c.name}</span>
                         {c.cost && (
                           <span className="mono text-[10px]" style={{ color: "var(--dim)" }}>{c.cost}g</span>
                         )}
-                      </span>
+                      </a>
                     ))}
                   </div>
                 </div>

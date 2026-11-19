@@ -1,8 +1,9 @@
+import { pageLink, usePageQuery } from "./Navigation.jsx";
 import React, { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { ChampionIcon, ItemIcon } from "./icons.jsx";
 import { assignTiers, TierBadge } from "./tiers.jsx";
-import { useReportFocus, useIncomingNav } from "./focus.jsx";
+import { useReportFocus } from "./focus.jsx";
 import { StatChip } from "./stats.jsx";
 import { PageHeader, FilterChips, StatTable, Place, PlaceChange, Frequency, pct } from "./table.jsx";
 
@@ -76,9 +77,9 @@ function ItemDetailCard({ it, itemMeta }) {
  */
 export default function Items({ stats, itemMeta }) {
   const [category, setCategory] = useState("Completed");
-  const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "place", dir: "asc" });
   const [expanded, setExpanded] = useState(() => new Set());
+  const [query, setQuery] = usePageQuery("items", () => { setCategory("all"); });
 
   // Which ids are actually ingredients in some recipe -- the only reliable way
   // to tell a real component from a no-recipe one-off.
@@ -121,22 +122,19 @@ export default function Items({ stats, itemMeta }) {
     return out;
   }, [rows, category, query]);
 
-  // The assistant links here; filter to whatever it was talking about rather
-  // than dropping the player at the top of a long table.
-  useIncomingNav("items", setQuery);
-
   // Tell the assistant what's open, so a question can say "it" and resolve.
   const reportFocus = useReportFocus();
-  const toggle = (id) =>
-    setExpanded((p) => {
-      const n = new Set(p);
-      if (n.has(id)) { n.delete(id); reportFocus("item", null); }
-      else { n.add(id); reportFocus("item", rows.find((r) => r.id === id)?.name); }
-      return n;
-    });
+  const toggle = (id) => {
+    const next = new Set(expanded);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExpanded(next);
+    reportFocus("item", next.has(id) ? rows.find((r) => r.id === id)?.name : null);
+  };
 
   const baseline = stats.baseline_placement;
 
+  const hasChange = Object.keys(stats.place_change?.items || {}).length > 0;
   const columns = useMemo(() => [
     {
       key: "item", label: "Item", sortFn: (a, b) => a.name.localeCompare(b.name),
@@ -187,7 +185,7 @@ export default function Items({ stats, itemMeta }) {
         </span>
       ),
     },
-  ], [baseline, itemMeta, stats]);
+  ].filter((c) => hasChange || c.key !== "change"), [baseline, itemMeta, stats, hasChange]);
 
   if (rows.length === 0) {
     return (
@@ -199,10 +197,7 @@ export default function Items({ stats, itemMeta }) {
 
   return (
     <div>
-      <PageHeader
-        title="TFT Items Tier List"
-        blurb="Which items are worth building on this patch, ranked by the average placement of boards that finished holding them. Open a row for the item's effect and the units that hold it best."
-        sampleSize={stats.sample_size} generatedAt={stats.generated_at}>
+      <PageHeader title="Item Ranking">
         <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
           {rows.length} items with enough games to rank in this slice
         </p>
@@ -236,7 +231,8 @@ export default function Items({ stats, itemMeta }) {
                 </p>
                 <div className="space-y-1 max-w-2xl">
                   {it.holders.map((h) => (
-                    <div key={h.champion} className="flex items-center gap-2.5 rounded border px-2.5 py-1.5"
+                    <a key={h.champion} href={pageLink("champions", stats.champion_names?.[h.champion] || h.champion)}
+                       className="row-hover flex items-center gap-2.5 rounded border px-2.5 py-1.5"
                          style={{ borderColor: "var(--line)" }}>
                       <ChampionIcon src={stats.champion_icons?.[h.champion]}
                                     name={stats.champion_names?.[h.champion] || h.champion} size={24} />
@@ -250,7 +246,7 @@ export default function Items({ stats, itemMeta }) {
                             style={{ color: h.avg_placement < baseline ? "var(--signal)" : "var(--text)" }}>
                         {h.avg_placement.toFixed(2)}
                       </span>
-                    </div>
+                    </a>
                   ))}
                 </div>
                 <p className="text-[10px] mt-1.5 leading-snug max-w-2xl" style={{ color: "var(--muted)" }}>

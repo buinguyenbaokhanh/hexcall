@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Send, Loader2, AlertTriangle, Database, X, MessageCircle, ArrowUpRight } from "lucide-react";
+import { navigate } from "./Navigation.jsx";
 import { useFocus } from "./focus.jsx";
 
 const STARTERS = [
@@ -78,8 +79,8 @@ function Bubble({ turn, onOpen }) {
  * badge or a greeting, never animates for attention, and remembers being
  * dismissed. Closed, it is an icon.
  */
-export default function ChatDock({ apiBase, staticMode, sliceId, patchLabel, tabLabel }) {
-  const { focus, requestNav } = useFocus();
+export default function ChatDock({ apiBase, staticMode, sliceId, datasetLabel, tabLabel }) {
+  const { focus } = useFocus();
   const [open, setOpen] = useState(() => {
     try { return localStorage.getItem(OPEN_KEY) === "1"; } catch { return false; }
   });
@@ -101,6 +102,7 @@ export default function ChatDock({ apiBase, staticMode, sliceId, patchLabel, tab
   // player is typing anywhere else, so it never steals a keystroke.
   useEffect(() => {
     const onKey = (e) => {
+      if (document.querySelector("dialog[open]")) return;
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
       if (e.key === "/" && !typing && !open) { e.preventDefault(); setOpen(true); }
       if (e.key === "Escape" && open) setOpen(false);
@@ -143,9 +145,9 @@ export default function ChatDock({ apiBase, staticMode, sliceId, patchLabel, tab
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} aria-label="Ask about the data"
-              title="Ask about the data  ( / )"
-              className="fixed bottom-5 right-5 z-40 w-11 h-11 rounded-full border flex items-center justify-center transition-colors row-hover"
+      <button onClick={() => setOpen(true)} aria-label="Ask About the Data"
+              title="Ask About the Data  ( / )"
+              className="chat-dock fixed bottom-5 right-5 z-40 w-11 h-11 rounded-full border flex items-center justify-center transition-colors row-hover"
               style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
         <MessageCircle size={17} style={{ color: "var(--dim)" }} />
       </button>
@@ -153,15 +155,15 @@ export default function ChatDock({ apiBase, staticMode, sliceId, patchLabel, tab
   }
 
   return (
-    <div className="fixed bottom-5 right-5 z-40 w-[min(390px,calc(100vw-2.5rem))] rounded-xl border shadow-2xl flex flex-col"
+    <div className="chat-dock fixed bottom-5 right-5 z-40 w-[min(390px,calc(100vw-2.5rem))] rounded-xl border shadow-2xl flex flex-col"
          style={{ background: "var(--surface)", borderColor: "var(--line)", maxHeight: "min(70vh, 620px)" }}>
 
       <div className="flex items-start gap-2 px-3.5 py-2.5 border-b shrink-0"
            style={{ borderColor: "var(--line)" }}>
         <div className="min-w-0 flex-1">
-          <p className="display text-[12.5px]">Ask about the data</p>
+          <p className="display text-[12.5px]">Ask About the Data</p>
           <p className="text-[10px] mt-0.5 truncate" style={{ color: "var(--muted)" }}>
-            patch {patchLabel || "—"} · {sliceId || "global-all"}
+            {datasetLabel || "Ranked TFT"} · {sliceId || "global-all"}
             {focus && ` · ${focus.name}`}
           </p>
         </div>
@@ -194,7 +196,8 @@ export default function ChatDock({ apiBase, staticMode, sliceId, patchLabel, tab
                   onOpen={(r) => {
                     // A tier-list reference means "show me the ranking", so it
                     // opens the tab unfiltered; a named entity filters to it.
-                    requestNav(r.tab, /tier list/i.test(r.name) ? "" : r.name);
+                    navigate(r.tab, /tier list/i.test(r.name) ? "" : r.name);
+                    setOpen(false);
                   }} />
         ))}
         {busy && (

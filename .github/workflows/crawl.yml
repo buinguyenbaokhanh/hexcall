@@ -63,8 +63,7 @@ jobs:
             --tiers challenger grandmaster \
             --players-per-tier 100 \
             --matches-per-player 20 \
-            --lookback-days 3 \
-            --set 17
+            --lookback-days 3
 
       - name: Save match store
         uses: actions/cache/save@v4

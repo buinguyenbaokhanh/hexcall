@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Loader2, AlertTriangle, Star, Info } from "lucide-react";
+import { Loader2, AlertTriangle, Star } from "lucide-react";
 import { ChampionIcon, ItemIcon, AugmentIcon } from "./icons.jsx";
+import Positioning from "./Positioning.jsx";
 import { TraitBadge } from "./TraitBadge.jsx";
 import { HoverCard } from "./HoverCard.jsx";
 
@@ -26,7 +27,7 @@ function placementColor(v, baseline) {
 function Section({ title, note, children }) {
   return (
     <section>
-      <h4 className="text-[11px] uppercase tracking-wider mb-2.5" style={{ color: "var(--dim)" }}>
+      <h4 className="display text-[13px] font-semibold mb-2.5" style={{ color: "var(--dim)" }}>
         {title}
       </h4>
       {children}
@@ -75,16 +76,11 @@ function carouselPriority(view, itemMeta) {
 /**
  * Build detail for one comp.
  *
- * Everything shown here is derived from tft-match-v1's end-of-game snapshot:
- * unit rosters, star levels, item sets, traits and final level. The API
- * exposes no board coordinates and no round timeline, so there is deliberately
- * no formation map and no stage-by-stage levelling guide — those would have to
- * be invented rather than measured.
  */
 export default function CompBuild({
   apiBase, staticMode, sliceId, slug, selectedAugments, augmentNames,
   augmentIcons = {}, itemMeta = {}, traitMeta = {}, augmentMeta = {},
-  compPairs = [], baseline,
+  compPairs = [], baseline, championMeta, version,
 }) {
   const [doc, setDoc] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -98,12 +94,12 @@ export default function CompBuild({
     const url = staticMode
       ? `${apiBase}/comps/${sliceId}/${slug}.json`
       : `${apiBase}/comp/${sliceId}/${slug}`;
-    fetch(url)
+    fetch(version ? `${url}?v=${version}` : url)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((d) => { if (!cancelled) { setDoc(d); setLoading(false); } })
       .catch((e) => { if (!cancelled) { setError(String(e.message || e)); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [apiBase, staticMode, sliceId, slug]);
+  }, [apiBase, staticMode, sliceId, slug, version]);
 
   const availableCuts = useMemo(() => {
     if (!doc) return [];
@@ -258,11 +254,13 @@ export default function CompBuild({
         </p>
       )}
 
+      <Positioning key={`${slug}-${lens}`} view={view} championMeta={championMeta} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6">
         <div className="space-y-6">
           {/* Full synergy list */}
           {view.traits?.length > 0 && (
-            <Section title="full synergy list"
+            <Section title="Full Synergy List"
                      note="Breakpoint each trait most commonly reached, with how often the board hit it.">
               <div className="flex flex-wrap gap-1.5">
                 {view.traits.map((t) => (
@@ -275,7 +273,7 @@ export default function CompBuild({
 
           {/* Core champions */}
           {core.length > 0 && (
-            <Section title="core champions"
+            <Section title="Core Champions"
                      note="On at least 90% of boards running this comp — the part that isn't flexible.">
               <div className="flex flex-wrap gap-2">
                 {core.map((u) => (
@@ -294,7 +292,7 @@ export default function CompBuild({
 
           {/* Carousel priority */}
           {components.length > 0 && (
-            <Section title="carousel priority"
+            <Section title="Carousel Priority"
                      note="Components the comp's best builds consume, most-needed first. The API has no round timeline, so which carousel you take them on can't be measured.">
               <div className="flex flex-wrap gap-1.5">
                 {components.map((c) => (
@@ -312,7 +310,7 @@ export default function CompBuild({
           )}
 
           {/* Units */}
-          <Section title="units · play rate and placement">
+          <Section title="Unit Play Rate and Placement">
             <div className="space-y-2">
               {view.units.map((u) => (
                 <div key={u.id}>
@@ -353,7 +351,7 @@ export default function CompBuild({
         <div className="space-y-6">
           {/* Recommended augments, by the rarity they're offered at */}
           {RARITY_ORDER.some((r) => augmentsByRarity[r].length > 0) && (
-            <Section title="augments that help this comp"
+            <Section title="Augments for This Comp"
                      note="Ranked by how much the comp's average placement improves when held with each. Hover for the effect text.">
               <div className="space-y-3">
                 {RARITY_ORDER.map((rarity) => {
@@ -404,7 +402,7 @@ export default function CompBuild({
           )}
 
           {/* Item builds */}
-          <Section title="best item sets">
+          <Section title="Best Item Sets">
             {view.units.filter((u) => u.builds?.length).slice(0, 3).map((u) => (
               <div key={u.id} className="mb-3.5">
                 <p className="flex items-center gap-2 text-[13px] mb-2">
@@ -439,7 +437,7 @@ export default function CompBuild({
 
           {/* Item count on carry */}
           {view.item_count_curve?.length > 1 && (
-            <Section title="items on carry → placement">
+            <Section title="Placement by Carry Item Count">
               <div className="flex gap-2.5">
                 {view.item_count_curve.map((r) => (
                   <div key={r.items} className="flex-1 rounded-lg border px-2.5 py-2 text-center"
@@ -456,7 +454,7 @@ export default function CompBuild({
           {view.level_curve?.length > 0 && (() => {
             const peak = Math.max(...view.level_curve.map((x) => x.pct));
             return (
-              <Section title="level finished on"
+              <Section title="Final Level"
                        note="Where players finished, not when they levelled — the API returns one end-of-game snapshot with no round timeline, so a stage-by-stage levelling guide can't be measured from it.">
                 <div className="space-y-1">
                   {view.level_curve.map((r) => {
@@ -493,15 +491,6 @@ export default function CompBuild({
         </div>
       </div>
 
-      <p className="text-[11px] mt-6 pt-4 border-t leading-relaxed flex items-start gap-2"
-         style={{ borderColor: "var(--line)", color: "var(--muted)" }}>
-        <Info size={13} className="mt-[1px] shrink-0" />
-        <span>
-          No formation map: tft-match-v1 returns unit identities and items but no board
-          coordinates, so positioning cannot be measured from this data. Sites that show a
-          hex formation read the game client through an overlay.
-        </span>
-      </p>
     </div>
   );
 }
