@@ -1,7 +1,9 @@
+import { pageLink, usePageQuery } from "./Navigation.jsx";
 import React, { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { ChampionIcon, ItemIcon } from "./icons.jsx";
 import { assignTiers, TierBadge } from "./tiers.jsx";
+import { useReportFocus } from "./focus.jsx";
 import { StatGrid } from "./stats.jsx";
 import { TraitChip } from "./TraitBadge.jsx";
 import {
@@ -116,9 +118,9 @@ function popularItems(builds, limit = 5) {
 export default function Champions({ stats, championMeta, itemMeta, traitMeta = {} }) {
   const [roleFilter, setRoleFilter] = useState("all");
   const [costFilter, setCostFilter] = useState("all");
-  const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "place", dir: "asc" });
   const [expanded, setExpanded] = useState(() => new Set());
+  const [query, setQuery] = usePageQuery("champions", () => { setCostFilter("all"); setRoleFilter("all"); });
 
   const { rows, measuredCount } = useMemo(() => {
     const catalog = championMeta || {};
@@ -157,26 +159,45 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
     if (roleFilter !== "all") out = out.filter((r) => r.role === roleFilter);
     if (costFilter !== "all") out = out.filter((r) => r.cost === costFilter);
     if (query.trim()) {
-      const q = query.toLowerCase();
+      const q = query.trim().toLowerCase();
       out = out.filter((r) =>
         r.name.toLowerCase().includes(q) || r.traits.some((t) => t.toLowerCase().includes(q)));
     }
     return out;
   }, [rows, roleFilter, costFilter, query]);
 
-  const toggle = (id) =>
-    setExpanded((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  // Tell the assistant what's open, so a question can say "it" and resolve.
+  const reportFocus = useReportFocus();
+  const toggle = (id) => {
+    const next = new Set(expanded);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExpanded(next);
+    reportFocus("unit", next.has(id) ? rows.find((r) => r.id === id)?.name : null);
+  };
+  const leaders = useMemo(() => {
+    const byCost = new Map();
+    for (const row of rows) {
+      if (row.measured && row.cost && (!byCost.has(row.cost) || row.n > byCost.get(row.cost).n)) {
+        byCost.set(row.cost, row);
+      }
+    }
+    return [...byCost.values()].sort((a, b) => a.cost - b.cost);
+  }, [rows]);
+  const costs = [...new Set(rows.map((r) => r.cost).filter(Boolean))].sort((a, b) => a - b);
+  const roles = ROLE_ORDER.filter((role) => rows.some((r) => r.role === role));
 
   const baseline = stats.baseline_placement;
 
+  const hasChange = Object.keys(stats.place_change?.units || {}).length > 0;
   const columns = useMemo(() => [
     {
       key: "unit", label: "Unit", sortFn: (a, b) => a.name.localeCompare(b.name),
       cell: (c) => (
         <div className="flex items-center gap-2.5 min-w-0">
-          <span className="shrink-0 rounded-full p-[2px]"
+          <span className="unit-portrait shrink-0"
                 style={{ border: `1.5px solid ${COST_COLORS[c.cost] || "var(--line)"}` }}>
-            <ChampionIcon src={c.icon} name={c.name} size={30} />
+            <ChampionIcon src={c.icon} name={c.name} size={36} />
           </span>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
@@ -236,7 +257,7 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
         </span>
       ),
     },
-  ], [baseline, itemMeta, traitMeta]);
+  ].filter((c) => hasChange || c.key !== "change"), [baseline, itemMeta, traitMeta, hasChange]);
 
   if (rows.length === 0) {
     return (
@@ -248,31 +269,49 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
 
   return (
     <div>
-      <PageHeader
-        title="TFT Unit Tier List"
-        blurb="Every unit in the set, ranked by measured average placement. Open a row for its best item builds, the components those need, and the comps it gets played in."
-        sampleSize={stats.sample_size} generatedAt={stats.generated_at}>
-        <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
-          {rows.length} in the set · {measuredCount} with enough games to rank in this slice
-        </p>
+      {leaders.length > 0 && (
+        <section className="cost-leaders" aria-labelledby="cost-leaders-title">
+          <div className="section-heading"><h2 id="cost-leaders-title" className="section-title">Most Played by Cost</h2></div>
+          <div className="leader-list scroll-thin">
+            {leaders.map((c) => (
+              <button key={c.id} style={{ "--cost-color": COST_COLORS[c.cost] || "var(--accent)" }}
+                      aria-label={`View ${c.name}, most played ${c.cost}-cost unit`}
+                      onClick={() => {
+                        setCostFilter("all"); setRoleFilter("all"); setQuery(c.name);
+                        setExpanded(new Set([c.id])); reportFocus("unit", c.name);
+                      }}>
+                <ChampionIcon className="portrait" src={c.icon} name={c.name} size={39} />
+                <span className="min-w-0">
+                  <small>{c.cost} gold</small><strong>{c.name}</strong>
+                  <span className="share">{pct(c.n / stats.sample_size)} of boards</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      <PageHeader title="Unit Ranking">
+        <span className="section-meta">{filtered.length === rows.length
+          ? `${measuredCount} ranked · ${rows.length} in roster`
+          : `${filtered.length} of ${rows.length} shown`}</span>
       </PageHeader>
-
-      <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
-        <div className="flex items-center gap-3 flex-wrap">
-          <FilterChips
-            label="role" value={roleFilter} onChange={setRoleFilter}
-            options={[["all", "All"], ...ROLE_ORDER.map((r) => [r, r, ROLE_COLORS[r]])]} />
-          <FilterChips
-            label="cost" value={costFilter} onChange={setCostFilter}
-            options={[["all", "All"], ...[1, 2, 3, 4, 5].map((c) => [c, `${c}g`, COST_COLORS[c]])]} />
-        </div>
-        <div className="relative shrink-0">
-          <Search size={12} className="absolute left-2.5 top-[9px]" style={{ color: "var(--dim)" }} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)}
-                 placeholder="Search name or trait"
-                 className="rounded pl-7 pr-2 py-1.5 text-[12px] border outline-none focus:border-[var(--accent)] transition-colors w-52"
-                 style={{ background: "var(--surface)", borderColor: "var(--line)", color: "var(--text)" }} />
-        </div>
+      <div className="roster-toolbar">
+        <label className="roster-search"><Search size={15} />
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)}
+                 aria-label="Search units by name or trait" placeholder="Search name or trait" />
+        </label>
+        {costs.length > 0 && <FilterChips label="cost" value={costFilter} onChange={setCostFilter}
+          options={[["all", "All"], ...costs.map((c) => [c, `${c}g`, COST_COLORS[c]])]} />}
+        {roles.length > 0 && <select aria-label="Filter by known role" className="roster-role"
+                                    value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+          <option value="all">All roles</option>
+          {roles.map((role) => <option key={role}>{role}</option>)}
+        </select>}
+        {(query || costFilter !== "all" || roleFilter !== "all") && (
+          <button className="reset-filters" onClick={() => {
+            setQuery(""); setCostFilter("all"); setRoleFilter("all"); setExpanded(new Set()); reportFocus("unit", null);
+          }}>Reset</button>
+        )}
       </div>
 
       <StatTable
@@ -336,7 +375,11 @@ export default function Champions({ stats, championMeta, itemMeta, traitMeta = {
                     <div key={cp.comp} className="flex items-center gap-2.5 rounded border px-2.5 py-1.5"
                          style={{ borderColor: "var(--line)" }}>
                       <span className="text-[12px] truncate flex-1 min-w-0">
-                        {stats.comp_names?.[cp.comp] || cp.comp}
+                        {stats.comps?.[cp.comp] ? (
+                          <a className="underline text-left" href={pageLink("comps", stats.comp_names?.[cp.comp] || cp.comp)}>
+                            {stats.comp_names?.[cp.comp] || cp.comp}
+                          </a>
+                        ) : stats.comp_names?.[cp.comp] || cp.comp}
                       </span>
                       <span className="mono text-[10.5px] shrink-0" style={{ color: "var(--dim)" }}>
                         {(cp.share * 100).toFixed(0)}% of boards

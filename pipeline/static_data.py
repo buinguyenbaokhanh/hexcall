@@ -183,6 +183,7 @@ def live_set(raw: dict, set_number: int | str | None = None) -> dict:
         for s in sets:
             if str(s["number"]) == str(set_number):
                 return s
+        return {}
     return max(sets, key=lambda s: int(s["number"]))
 
 
@@ -767,6 +768,7 @@ def build_champion_meta(resolver: NameResolver, set_number: int | str | None = N
             "cost": c.get("cost"),
             "role": role,
             "role_group": _role_group(role),
+            "attack_range": stats.get("range"),
             "traits": c.get("traits") or [],
             "stats": {
                 key: round(stats[src], 2)

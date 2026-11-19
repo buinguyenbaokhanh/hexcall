@@ -100,17 +100,15 @@ each cut is built ahead of time and listed in the manifest.
 
 **Tier filtering applies to participants, not matches.** A Challenger game
 contains seven opponents who may be Master or Diamond. Filtering by match would
-quietly contaminate an "apex only" slice with lower-tier boards. `puuids_for_tiers()`
-filters individual participants against the ladder crawl.
+quietly contaminate an "apex only" slice with lower-tier boards. The publisher checks individual participants against ladder observations from the sampled set.
 
 **Under-sampled slices are dropped, not published.** `MIN_SAMPLE_TO_PUBLISH`
 (4,000 participants) — a slice below that produces noise dressed up as a tier
 list. In testing, EUW and KR were correctly withheld at ~3,850.
 
-**Old patches are deleted, not archived.** After a balance patch the old data
-describes a game that no longer exists. Keeping it inflates sample size while
-degrading accuracy. `prune_old_patches()` detects the version change and clears
-the window.
+**Patch history powers Trends.** The scheduler retains older matches. Published
+rankings use the selected set and client build. When Riot supplies no build
+number for a Set 18 match, the publisher assigns the patch from its match date and the release calendar.
 
 **Publishing is atomic.** Each build writes to `builds/<timestamp>/`, then flips
 a `current` symlink. A client mid-fetch never sees a half-written file, and

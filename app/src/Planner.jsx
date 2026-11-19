@@ -7,10 +7,12 @@ import { HoverCard } from "./HoverCard.jsx";
  * Which items each component builds into, derived by inverting the published
  * recipes rather than hard-coding a table -- so it follows the live set.
  */
-function componentIndex(itemMeta) {
+function componentIndex(itemMeta, setNumber) {
   const components = new Map();   // component id -> {id, name, icon}
   const recipes = [];             // {id, name, icon, needs: [componentId, ...]}
   for (const [id, meta] of Object.entries(itemMeta || {})) {
+    // The Set 18 catalogue also ships legacy recipes with identical component names.
+    if (setNumber === 18 && !id.startsWith("DA_")) continue;
     const recipe = meta.recipe || [];
     if (recipe.length === 0) continue;
     recipes.push({ id, name: meta.name || id, icon: meta.icon, needs: recipe.map((c) => c.id) });
@@ -45,7 +47,7 @@ function missingFrom(have, needs) {
 export default function Planner({ stats, itemMeta, onOpenComp }) {
   const [have, setHave] = useState({});   // componentId -> count
 
-  const { components, recipes } = useMemo(() => componentIndex(itemMeta), [itemMeta]);
+  const { components, recipes } = useMemo(() => componentIndex(itemMeta, stats.tft_set), [itemMeta, stats.tft_set]);
   const held = Object.values(have).reduce((a, b) => a + b, 0);
 
   const add = (id) => setHave((h) => ({ ...h, [id]: (h[id] || 0) + 1 }));
@@ -155,7 +157,7 @@ export default function Planner({ stats, itemMeta, onOpenComp }) {
              style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
         <div className="flex items-center justify-between mb-2.5">
           <h2 className="display text-[12.5px] flex items-center gap-1.5">
-            <Sparkles size={13} style={{ color: "var(--accent)" }} /> Your components
+            <Sparkles size={13} style={{ color: "var(--accent)" }} /> Your Components
           </h2>
           <span className="mono text-[11px]" style={{ color: "var(--dim)" }}>{held}</span>
         </div>
@@ -210,7 +212,7 @@ export default function Planner({ stats, itemMeta, onOpenComp }) {
       <section className="space-y-4">
         {held === 0 ? (
           <div className="rounded-lg border p-4" style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
-            <h2 className="display text-[15px] font-semibold mb-1">Start with what dropped</h2>
+            <h2 className="display text-[15px] font-semibold mb-1">Choose Your Components</h2>
             <p className="text-[12.5px] leading-relaxed" style={{ color: "var(--dim)" }}>
               Add the components you're holding and this becomes a plan: what you can build now,
               who should hold it, which comps that steers you into, and which component to
@@ -222,7 +224,7 @@ export default function Planner({ stats, itemMeta, onOpenComp }) {
             {/* Build now */}
             <div className="rounded-lg border p-4" style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
               <h3 className="display text-[13px] font-semibold mb-2.5">
-                You can build
+                Items You Can Build
                 <span className="mono text-[11px] ml-2" style={{ color: "var(--dim)" }}>
                   {buildable.length}
                 </span>
@@ -256,7 +258,7 @@ export default function Planner({ stats, itemMeta, onOpenComp }) {
             {/* Who holds it */}
             {carries.length > 0 && (
               <div className="rounded-lg border p-4" style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
-                <h3 className="display text-[13px] font-semibold mb-2.5">Give it to</h3>
+                <h3 className="display text-[13px] font-semibold mb-2.5">Recommended Item Holders</h3>
                 <div className="space-y-1.5">
                   {carries.map((c) => (
                     <div key={c.champion} className="flex items-center gap-2.5 rounded-lg border px-2.5 py-2"
@@ -294,7 +296,7 @@ export default function Planner({ stats, itemMeta, onOpenComp }) {
             {/* Where it leads */}
             {comps.length > 0 && (
               <div className="rounded-lg border p-4" style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
-                <h3 className="display text-[13px] font-semibold mb-2.5">Comps that go with it</h3>
+                <h3 className="display text-[13px] font-semibold mb-2.5">Compatible Comps</h3>
                 <div className="space-y-1.5">
                   {comps.map((c) => (
                     <button key={c.sig} onClick={() => onOpenComp({ ...c, projected: c.avg_placement ?? c.avg,
@@ -324,7 +326,7 @@ export default function Planner({ stats, itemMeta, onOpenComp }) {
               <div className="rounded-lg border p-4" style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
                 <div className="flex items-center gap-2 mb-2.5">
                   <TrendingUp size={13} style={{ color: "var(--accent)" }} />
-                  <h3 className="display text-[13px] font-semibold">Prioritise on carousel</h3>
+                  <h3 className="display text-[13px] font-semibold">Carousel Priorities</h3>
                 </div>
                 <div className="space-y-1.5">
                   {nextComponent.map((g) => (

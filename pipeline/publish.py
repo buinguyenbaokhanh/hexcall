@@ -121,6 +121,78 @@ _PATCH_RE = re.compile(r"(\d+)\.(\d+)")
 MIN_PATCH_MATCHES = 1200
 
 
+def current_set(conn: sqlite3.Connection, min_matches: int = 200) -> int | None:
+    """The newest set the store holds enough of to build from.
+
+    Hardcoding the set number meant every publish after a rollover filtered out
+    the entire live game: the flag still said 17 while the API had moved to 18.
+    Gated on sample for the same reason the patch is -- the first matches of a
+    new set arrive while the previous one still holds all the data worth
+    publishing, and switching on the first sighting would empty the site.
+    """
+    counts: dict[int, int] = {}
+    for tft_set, n in conn.execute(
+            "SELECT tft_set, COUNT(*) FROM matches WHERE queue_id = 1100 AND tft_set IS NOT NULL "
+            "GROUP BY tft_set"):
+        counts[int(tft_set)] = n
+    if not counts:
+        return None
+    for s in sorted(counts, reverse=True):
+        if counts[s] >= min_matches:
+            return s
+    return max(counts, key=lambda k: (counts[k], k))
+
+
+def slice_scope(conn, sd, patch, tft_set):
+    """Keep rank observations within this sample's region and collection window."""
+    filters = {"tft_set": tft_set}
+    where = ["queue_id = 1100", "tft_set = ?"]
+    params = [tft_set]
+    if patch:
+        filters["game_version_like"] = patch_filter(patch)
+        where.append("game_version LIKE ?")
+        params.append(filters["game_version_like"])
+    if sd.get("platform"):
+        filters["platform"] = sd["platform"]
+        where.append("platform = ?")
+        params.append(sd["platform"])
+
+    selected = " FROM matches WHERE " + " AND ".join(where)
+    last_match = conn.execute("SELECT MAX(game_datetime)" + selected, params).fetchone()[0]
+    # A player may have a Challenger observation from before the season reset.
+    # Only describe players on the sampled boards whose ladder was checked
+    # during this set. The next set's first ranked match bounds late backfills.
+    rows = conn.execute("""
+        WITH games AS (SELECT platform, raw, game_datetime, fetched_at""" + selected + """),
+        windows AS (
+            SELECT platform, MIN(game_datetime)/1000 AS first_game,
+                   MAX(fetched_at) AS last_fetch FROM games GROUP BY platform
+        ), newer_sets AS (
+            SELECT platform, MIN(game_datetime) AS first_game FROM matches
+            WHERE queue_id=1100 AND tft_set > ? GROUP BY platform
+        ), seeds AS (
+            SELECT p.puuid, p.platform, p.tier FROM players p JOIN windows w USING(platform)
+            LEFT JOIN newer_sets n USING(platform)
+            WHERE p.seen_at BETWEEN w.first_game AND w.last_fetch
+              AND (n.first_game IS NULL OR n.first_game > p.seen_at*1000)
+        )
+        SELECT s.puuid, s.tier, MAX(g.game_datetime)
+        FROM games g JOIN json_each(g.raw, '$.metadata.participants') member
+        JOIN seeds s ON s.puuid=member.value AND s.platform=g.platform
+        GROUP BY s.puuid, s.tier
+    """, [*params, tft_set]).fetchall()
+    if sd.get("tiers"):
+        rows = [r for r in rows if r[1] in sd["tiers"]]
+        mixed_store = conn.execute(
+            "SELECT 1 FROM matches WHERE queue_id = 1100 AND tft_set != ? LIMIT 1",
+            (tft_set,)).fetchone()
+        filters["puuid_filter"] = ({r[0] for r in rows} if mixed_store else
+                                   puuids_for_tiers(conn, sd["tiers"], sd.get("platform")))
+        last_match = max((r[2] for r in rows), default=None)
+    tiers = Counter(tier for _, tier, _ in rows if tier)
+    return filters, dict(tiers), last_match // 1000 if last_match else None
+
+
 def _set_clause(tft_set: int | None) -> tuple[str, tuple]:
     return (" AND tft_set = ?", (tft_set,)) if tft_set is not None else ("", ())
 
@@ -357,21 +429,10 @@ def name_comps(shapes: dict, overrides: dict | None, resolver) -> dict:
 
 
 def build_slice(conn: sqlite3.Connection, slice_def: dict, patch: str | None,
-                tft_set: int | None, resolver=None, comp_names: dict | None = None) -> dict:
-    filters: dict = {"tft_set": tft_set}
-    if patch:
-        filters["game_version_like"] = patch_filter(patch)
-    if slice_def.get("platform"):
-        filters["platform"] = slice_def["platform"]
-
-    # Tier filtering works on PARTICIPANTS, not matches. A Challenger game
-    # contains seven opponents who may be lower tier -- counting their boards
-    # would quietly contaminate an "apex only" slice with Master/Diamond play.
-    if slice_def.get("tiers"):
-        filters["puuid_filter"] = puuids_for_tiers(
-            conn, slice_def["tiers"], slice_def.get("platform"))
-
+                tft_set: int | None, resolver=None, comp_names: dict | None = None, scope=None) -> dict:
+    filters, tiers, last_match = scope or slice_scope(conn, slice_def, patch, tft_set)
     stats = build_stats(conn, **filters)
+    stats.update(tft_set=tft_set, last_match_at=last_match, population={"tiers": tiers})
 
     stats["slice_id"] = slice_def["id"]
     stats["slice_label"] = slice_def["label"]
@@ -472,8 +533,12 @@ def _explain_missing_patch(conn: sqlite3.Connection, tft_set: int | None) -> Non
 
 def publish(db_path: str = "tft.db", tft_set: int | None = None,
             comp_names: dict | None = None, keep_builds: int = 5,
-            patch: str | None = None) -> Path:
+            patch: str | None = None, asset_version: str | None = None) -> Path:
     conn = sqlite3.connect(db_path)
+    if tft_set is None:
+        tft_set = current_set(conn)
+    if tft_set is None:
+        raise RuntimeError("no ranked set in the match store")
     assign_calendar_patches(conn)
     forced = patch is not None
     patch = patch or current_patch(conn, tft_set=tft_set)
@@ -508,7 +573,7 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
 
     try:
         from static_data import load_all, NameResolver
-        resolver = NameResolver(load_all())
+        resolver = NameResolver(load_all(asset_version))
     except Exception as e:  # noqa: BLE001
         log.warning("Data Dragon unavailable (%s); falling back to ID prettifier", e)
         resolver = None
@@ -524,16 +589,22 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
                 "patch_source": patch_source(conn, patch),
                 "tft_set": tft_set, "slices": []}
 
-    for sd in SLICES:
-        filters = {"tft_set": tft_set}
-        if patch:
-            filters["game_version_like"] = patch_filter(patch)
-        if sd.get("platform"):
-            filters["platform"] = sd["platform"]
-        if sd.get("tiers"):
-            filters["puuid_filter"] = puuids_for_tiers(conn, sd["tiers"], sd.get("platform"))
+    champion_meta = {}
+    if resolver:
         try:
-            stats = build_slice(conn, sd, patch, tft_set, resolver, comp_names)
+            from static_data import build_champion_meta
+            champion_meta = build_champion_meta(resolver, tft_set)
+        except Exception:
+            log.exception("champion catalogue unavailable for this build")
+    playable_ids = set(champion_meta)
+
+    for sd in SLICES:
+        scope = slice_scope(conn, sd, patch, tft_set)
+        filters = scope[0]
+        if sd.get("tiers") and not filters["puuid_filter"]:
+            continue
+        try:
+            stats = build_slice(conn, sd, patch, tft_set, resolver, comp_names, scope)
         except Exception as e:  # noqa: BLE001
             log.exception("slice %s failed: %s", sd["id"], e)
             continue
@@ -556,7 +627,7 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
         detail_filters = {k: v for k, v in filters.items()}
         published = {sig: {"name": (comp_names or {}).get(sig, sig)} for sig in stats["comps"]}
         try:
-            details = build_comp_details(conn, published, resolver, **detail_filters)
+            details = build_comp_details(conn, published, resolver, playable_ids=playable_ids, **detail_filters)
         except Exception:
             log.exception("comp detail failed for %s; publishing without it", sd["id"])
             details = {}
@@ -668,8 +739,6 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
         # driven purely by stats would show a fraction of the real roster and
         # augment pool. The client joins measured stats onto these.
         try:
-            from static_data import build_champion_meta
-            champion_meta = build_champion_meta(resolver, tft_set)
             meta = _write(out / "champion-meta.json", champion_meta)
             log.info("published champion-meta: %d champions, %.1f KB gzipped",
                      len(champion_meta), meta["gzip_bytes"] / 1024)
@@ -717,7 +786,8 @@ if __name__ == "__main__":
     ap.add_argument("--set", type=int, dest="tft_set")
     ap.add_argument("--comp-names", help="JSON file mapping signature -> display name")
     ap.add_argument("--patch", help="override the auto-detected patch, e.g. 16.16")
+    ap.add_argument("--asset-version", help="Data Dragon version for a historical snapshot")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
     names = json.loads(Path(args.comp_names).read_text()) if args.comp_names else None
-    publish(args.db, args.tft_set, names, patch=args.patch)
+    publish(args.db, args.tft_set, names, patch=args.patch, asset_version=args.asset_version)

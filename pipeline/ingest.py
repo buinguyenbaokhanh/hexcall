@@ -70,9 +70,33 @@ def open_db(path: Path = DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+# Tiers to fall back through when the apex ladders are empty, best first.
+#
+# They ARE empty for the first days of a new set: ranked resets with the set,
+# and nobody has climbed to Master yet. On Set 18's launch day every apex
+# ladder on na1, euw1, sg2 and kr returned zero entries, which made the crawler
+# collect no players and store nothing while reporting success -- the same
+# silent-failure shape as the SEA routing bug, arriving from a different
+# direction.
+#
+# Descending is deliberate. Seeding from the highest tier that actually has
+# players keeps the population as close to the usual one as the ladder allows,
+# and the crawl narrows back to apex on its own as players climb.
+FALLBACK_TIERS = ["DIAMOND", "EMERALD", "PLATINUM", "GOLD", "SILVER", "BRONZE"]
+
+# Divisions within a tier, best first. I is the top of each tier.
+DIVISIONS = ["I", "II", "III", "IV"]
+
+
 def collect_ladder_puuids(client: RiotTFTClient, platform: str,
                           tiers: list[str], limit_per_tier: int) -> list[tuple[str, str, int]]:
-    """Returns [(puuid, tier, leaguePoints)]."""
+    """Returns [(puuid, tier, leaguePoints)].
+
+    Tries the requested apex tiers, then walks down the regular ladder if those
+    come back empty, so a set rollover degrades the POPULATION rather than
+    producing an empty crawl. What it actually seeded is logged and stored, so
+    the publisher can describe the population instead of assuming apex.
+    """
     out: list[tuple[str, str, int]] = []
     for tier in tiers:
         data = client.apex_league(platform, tier)
@@ -87,6 +111,50 @@ def collect_ladder_puuids(client: RiotTFTClient, platform: str,
             if puuid:
                 out.append((puuid, tier.upper(), e.get("leaguePoints", 0)))
         log.info("%s %s -> %d players", platform, tier, min(len(entries), limit_per_tier))
+
+    if out:
+        return out
+
+    log.warning("%s: every apex ladder is empty -- this is normal for the first "
+                "days of a set, when ranked has reset. Falling back down the "
+                "ladder so the crawl collects something rather than silently "
+                "storing nothing.", platform)
+    want = limit_per_tier * max(len(tiers), 1)
+    seen = set()
+    used: list[str] = []
+    for tier in FALLBACK_TIERS:
+        got_here = 0
+        for div in DIVISIONS:
+            page = 1
+            while len(out) < want:
+                entries = client.league_entries(platform, tier, div, page=page) or []
+                if not entries:
+                    break
+                for e in entries:
+                    puuid = e.get("puuid")
+                    if puuid and puuid not in seen:
+                        seen.add(puuid)
+                        out.append((puuid, tier, e.get("leaguePoints", 0)))
+                        got_here += 1
+                        if len(out) == want:
+                            break
+                page += 1
+            if len(out) >= want:
+                break
+        if got_here:
+            used.append(tier)
+        # Keep descending until there are ENOUGH players, not merely some. A
+        # thinly populated tier during a rollover yields a handful -- EUW gave
+        # 11 from Emerald -- and stopping there seeds a twentieth of the
+        # intended crawl while looking like it worked.
+        if len(out) >= want:
+            break
+    if used:
+        log.info("%s: seeded %d players from %s", platform, len(out),
+                 used[0] if len(used) == 1 else f"{used[0]}-{used[-1]}")
+    if not out:
+        log.error("%s: no players found in any tier. Either the region is dead "
+                  "or the ladder has not been populated yet.", platform)
     return out
 
 
@@ -98,6 +166,8 @@ def crawl(platform: str, tiers: list[str], players_per_tier: int,
     start_time = now - lookback_days * 86400
 
     players = collect_ladder_puuids(client, platform, tiers, players_per_tier)
+    if not players:
+        raise RuntimeError(f"no ladder players found on {platform}")
     log.info("collected %d ladder players on %s", len(players), platform)
 
     conn.executemany(

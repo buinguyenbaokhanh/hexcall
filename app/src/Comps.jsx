@@ -1,5 +1,7 @@
+import { usePageQuery } from "./Navigation.jsx";
 import React, { useMemo, useState, useEffect } from "react";
 import { Search, ChevronDown, ChevronUp, Swords, Loader2, Copy, Check } from "lucide-react";
+import Positioning from "./Positioning.jsx";
 import { UnitsPane, ItemsPane, TraitsPane, StatsPane } from "./CompPanes.jsx";
 import { ChampionIcon, ItemIcon, carryIdFromSig } from "./icons.jsx";
 import { TraitBadge } from "./TraitBadge.jsx";
@@ -109,13 +111,8 @@ function playstyle(c) {
  * Inline detail, in place of a modal — the reference expands the row, which
  * keeps the rest of the tier list visible while you read one comp.
  *
- * Sections cover what the match API supports. There is deliberately no
- * positioning board and no per-round "early boards with round win rate":
- * tft-match-v1 returns one end-of-game snapshot with no coordinates and no
- * round timeline, so both would have to be fabricated. Sites that show them
- * collect it from a client-side overlay instead.
  */
-function CompDetail({ comp, stats, traitMeta, itemMeta, onOpenComp, apiBase, staticMode, sliceId }) {
+function CompDetail({ comp, stats, traitMeta, itemMeta, championMeta, onOpenComp, apiBase, staticMode, sliceId, version }) {
   const [pane, setPane] = useState("units");
   const [doc, setDoc] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -129,17 +126,17 @@ function CompDetail({ comp, stats, traitMeta, itemMeta, onOpenComp, apiBase, sta
     setLoading(true);
     const url = staticMode ? `${apiBase}/comps/${sliceId}/${slug}.json`
                            : `${apiBase}/comp/${sliceId}/${slug}`;
-    fetch(url).then((r) => (r.ok ? r.json() : null))
+    fetch(version ? `${url}?v=${version}` : url).then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (!cancelled) { setDoc(d); setLoading(false); } })
       .catch(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [apiBase, staticMode, sliceId, slug]);
+  }, [apiBase, staticMode, sliceId, slug, version]);
 
   const view = doc?.base;
   const baseline = stats.baseline_placement;
 
   const panes = [
-    ["units", "Units"], ["items", "Items"], ["traits", "Traits"],
+    ["units", "Units"], ["positioning", "Positioning"], ["items", "Items"], ["traits", "Traits"],
     ["levels", "Levelling"],
     counters.length ? ["counters", "Matchups"] : null,
     ["stats", "Stats"],
@@ -151,7 +148,7 @@ function CompDetail({ comp, stats, traitMeta, itemMeta, onOpenComp, apiBase, sta
     <div className="border-t" style={{ borderColor: "var(--line)", background: "var(--bg)" }}>
       <div className="flex gap-1 px-3 pt-2 flex-wrap border-b" style={{ borderColor: "var(--line)" }}>
         {panes.map(([id, label]) => (
-          <button key={id} onClick={() => setPane(id)}
+          <button key={id} onClick={() => setPane(id)} aria-pressed={pane === id}
                   className="text-[12px] px-3 py-1.5 border-b-2 transition-colors -mb-px"
                   style={{ borderColor: pane === id ? "var(--accent)" : "transparent",
                            color: pane === id ? "var(--text)" : "var(--dim)" }}>
@@ -174,6 +171,7 @@ function CompDetail({ comp, stats, traitMeta, itemMeta, onOpenComp, apiBase, sta
         )}
 
         {!loading && view && pane === "units" && <UnitsPane view={view} baseline={baseline} />}
+        {!loading && view && pane === "positioning" && <Positioning view={view} championMeta={championMeta} />}
         {!loading && view && pane === "items" && <ItemsPane view={view} itemMeta={itemMeta} baseline={baseline} />}
         {!loading && view && pane === "traits" && <TraitsPane view={view} traitMeta={traitMeta} baseline={baseline} />}
         {!loading && pane === "stats" && (
@@ -250,12 +248,13 @@ function CompDetail({ comp, stats, traitMeta, itemMeta, onOpenComp, apiBase, sta
   );
 }
 
-export default function Comps({ stats, traitMeta, itemMeta, onOpenComp, apiBase, staticMode, sliceId }) {
-  const [query, setQuery] = useState("");
+export default function Comps({ stats, traitMeta, itemMeta, championMeta, onOpenComp, apiBase, staticMode, sliceId, version }) {
   const [tierFilter, setTierFilter] = useState("all");
   const [styleFilter, setStyleFilter] = useState("all");
   const [sortBy, setSortBy] = useState("placement");
   const [expanded, setExpanded] = useState(null);
+  const [query, setQuery] = usePageQuery("comps", () => { setStyleFilter("all"); setTierFilter("all"); setExpanded(null); });
+
 
   const rows = useMemo(() => {
     const raw = Object.entries(stats.comps || {}).map(([sig, c]) => ({
@@ -288,7 +287,7 @@ export default function Comps({ stats, traitMeta, itemMeta, onOpenComp, apiBase,
       const q = query.toLowerCase();
       out = out.filter((r) => r.name.toLowerCase().includes(q)
         || (r.board || []).some((u) => (u.name || "").toLowerCase().includes(q))
-        || (r.traits || []).some((t) => (t.name || "").toLowerCase().includes(q)));
+        || (r.traits || []).some((t) => (t.display || t.name || "").toLowerCase().includes(q)));
     }
     return [...out].sort(SORTS[sortBy].fn);
   }, [rows, tierFilter, styleFilter, query, sortBy]);
@@ -311,20 +310,20 @@ export default function Comps({ stats, traitMeta, itemMeta, onOpenComp, apiBase,
     <div>
       <div className="flex items-end justify-between gap-4 flex-wrap mb-3">
         <div>
-          <h2 className="display text-[15px] font-semibold">Compositions</h2>
+          <h2 className="section-title">Comp Ranking</h2>
           <p className="text-[11.5px] mt-0.5" style={{ color: "var(--dim)" }}>
-            {rows.length} comps · click one for the full build, items and levelling
+            {rows.length} comps · select a comp for positioning, items and levelling
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
+        <div className="flex flex-wrap items-center gap-2 max-w-full">
+          <div className="relative max-w-full">
             <Search size={12} className="absolute left-2.5 top-[10px]" style={{ color: "var(--dim)" }} />
             <input value={query} onChange={(e) => setQuery(e.target.value)}
                    placeholder="Search comp, unit or trait"
                    className="rounded pl-7 pr-2 py-2 text-[12px] border outline-none focus:border-[var(--accent)] transition-colors w-60"
                    style={{ background: "var(--surface)", borderColor: "var(--line)", color: "var(--text)" }} />
           </div>
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
+          <select aria-label="Sort comps" value={sortBy} onChange={(e) => setSortBy(e.target.value)}
                   className="text-[12px] rounded px-2 py-2 border outline-none"
                   style={{ background: "var(--surface)", borderColor: "var(--line)", color: "var(--text)" }}>
             {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>Sort: {v.label}</option>)}
@@ -387,7 +386,10 @@ export default function Comps({ stats, traitMeta, itemMeta, onOpenComp, apiBase,
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-2 mb-1.5 flex-wrap">
-                      <span className="display text-[14px] font-medium">{c.name}</span>
+                      <button className="display text-[14px] font-medium text-left hover:underline"
+                              aria-expanded={open} onClick={() => setExpanded(open ? null : c.sig)}>
+                        {c.name}
+                      </button>
                       {c.traits?.slice(0, 6).map((t) => (
                         <TraitBadge key={t.name} name={t.name} units={t.units}
                                     meta={traitMeta?.[t.name]} size={16} showName={false} />
@@ -419,7 +421,8 @@ export default function Comps({ stats, traitMeta, itemMeta, onOpenComp, apiBase,
                     <div className="mt-2 flex items-center justify-end gap-1.5">
                       <TeamCodeButton code={c.team_code} />
                     <button onClick={() => setExpanded(open ? null : c.sig)}
-                            className="p-1 rounded row-hover" aria-label="Toggle detail">
+                            className="p-1 rounded row-hover" aria-expanded={open}
+                            aria-label={`${open ? "Close" : "View"} build for ${c.name}`}>
                       {open ? <ChevronUp size={15} style={{ color: "var(--dim)" }} />
                             : <ChevronDown size={15} style={{ color: "var(--dim)" }} />}
                     </button>
@@ -438,7 +441,7 @@ export default function Comps({ stats, traitMeta, itemMeta, onOpenComp, apiBase,
             </div>
 
             {open && (
-              <CompDetail comp={c} stats={stats} traitMeta={traitMeta} itemMeta={itemMeta}
+              <CompDetail comp={c} stats={stats} championMeta={championMeta} version={version} traitMeta={traitMeta} itemMeta={itemMeta}
                           onOpenComp={onOpenComp} apiBase={apiBase}
                           staticMode={staticMode} sliceId={sliceId} />
             )}

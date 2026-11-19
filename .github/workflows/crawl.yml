@@ -73,8 +73,7 @@ jobs:
 
       # The journal travels with the database: if a crawl is ever cut off
       # mid-write, SQLite needs it to roll the half-written transaction back.
-      # The scheduler state is what lets the next run notice a patch change
-      # and prune the previous patch's matches.
+      # Scheduler state records the most recent successful publication.
       - name: Restore match store
         uses: actions/cache/restore@v4
         with:

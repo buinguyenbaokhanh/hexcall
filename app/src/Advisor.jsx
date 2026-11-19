@@ -220,7 +220,7 @@ export default function Advisor({ stats, augmentMeta, itemMeta, traitMeta, onOpe
       <section className="space-y-4">
         {filled === 0 ? (
           <div className="rounded-lg border p-4" style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
-            <h2 className="display text-[15px] font-semibold mb-1">Start with your 2-1 augment</h2>
+            <h2 className="display text-[15px] font-semibold mb-1">Choose Your 2-1 Augment</h2>
             <p className="text-[12.5px] leading-relaxed mb-3" style={{ color: "var(--dim)" }}>
               Your first augment sets a direction. Pick it and this becomes a plan: which comps
               it supports, why, and what to look for at 3-2 to reinforce rather than fight it.
@@ -247,10 +247,10 @@ export default function Advisor({ stats, augmentMeta, itemMeta, traitMeta, onOpe
                   : <Anchor size={14} style={{ color: "var(--signal)" }} />}
                 <h2 className="display text-[14px] font-semibold"
                     style={{ color: advice?.kind === "pivot" ? "var(--warn)" : "var(--signal)" }}>
-                  {filled === 1 ? "Build toward"
-                    : advice?.kind === "pivot" ? "Worth pivoting"
-                    : advice?.kind === "hold" ? "Stay — pivot isn't worth it"
-                    : "Stay the course"}
+                  {filled === 1 ? "Recommended Comp"
+                    : advice?.kind === "pivot" ? "Consider a Pivot"
+                    : advice?.kind === "hold" ? "Keep Your Current Comp"
+                    : "Stay the Course"}
                 </h2>
                 <span className="mono text-[10.5px]" style={{ color: "var(--dim)" }}>
                   after {filled} of 3
@@ -288,7 +288,7 @@ export default function Advisor({ stats, augmentMeta, itemMeta, traitMeta, onOpe
             {filled < 3 && (
               <div className="rounded-lg border p-4" style={{ background: "var(--surface)", borderColor: "var(--line)" }}>
                 <h3 className="display text-[13px] font-semibold mb-1">
-                  At {STAGES[filled].stage}, look for
+                  Augments for Stage {STAGES[filled].stage}
                 </h3>
                 <p className="text-[11.5px] mb-2.5" style={{ color: "var(--dim)" }}>
                   {STAGES[filled].blurb} These support{" "}
@@ -301,7 +301,7 @@ export default function Advisor({ stats, augmentMeta, itemMeta, traitMeta, onOpe
 
             {/* Other comps that fit */}
             <div>
-              <h3 className="display text-[13px] mb-2">Other comps your augments support</h3>
+              <h3 className="display text-[13px] mb-2">Other Comps Your Augments Support</h3>
               <div className="space-y-2">
                 {ranked.filter((c) => c.sig !== (anchor || ranked[0])?.sig && c.fit > 0)
                        .slice(0, 4)

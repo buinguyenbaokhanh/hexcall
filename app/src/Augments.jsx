@@ -1,3 +1,4 @@
+import { usePageQuery } from "./Navigation.jsx";
 import React, { useMemo, useState } from "react";
 import { Search, Info } from "lucide-react";
 import { AugmentIcon, ChampionIcon } from "./icons.jsx";
@@ -76,8 +77,9 @@ function AugmentCard({ a }) {
  */
 export default function Augments({ augmentMeta, championMeta, traitMeta }) {
   const [rarityFilter, setRarityFilter] = useState("all");
-  const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState("rarity");
+  const [query, setQuery] = usePageQuery("augments", () => { setRarityFilter("all"); });
+
 
   const rows = useMemo(() => Object.entries(augmentMeta || {}).map(([id, m]) => ({
     id, name: m.name || id, icon: m.icon, rarity: m.rarity,
@@ -122,20 +124,20 @@ export default function Augments({ augmentMeta, championMeta, traitMeta }) {
     <div>
       <div className="flex items-end justify-between gap-4 flex-wrap mb-3">
         <div>
-          <h2 className="display text-[15px] font-semibold">Augments</h2>
+          <h2 className="section-title">Set Catalogue</h2>
           <p className="text-[11.5px] mt-0.5" style={{ color: "var(--dim)" }}>
-            All {rows.length} augments in the set pool · hover any row for its full effect
+            {rows.length} catalogue entries · select an augment to read its effect
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
+        <div className="flex flex-wrap items-center gap-2 max-w-full">
+          <div className="relative max-w-full">
             <Search size={12} className="absolute left-2.5 top-[10px]" style={{ color: "var(--dim)" }} />
             <input value={query} onChange={(e) => setQuery(e.target.value)}
                    placeholder="Search name or effect"
                    className="rounded pl-7 pr-2 py-2 text-[12px] border outline-none focus:border-[var(--accent)] transition-colors w-56"
                    style={{ background: "var(--surface)", borderColor: "var(--line)", color: "var(--text)" }} />
           </div>
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
+          <select aria-label="Sort augments" value={sortBy} onChange={(e) => setSortBy(e.target.value)}
                   className="text-[12px] rounded px-2 py-2 border outline-none"
                   style={{ background: "var(--surface)", borderColor: "var(--line)", color: "var(--text)" }}>
             {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>Sort: {v.label}</option>)}
@@ -148,11 +150,8 @@ export default function Augments({ augmentMeta, championMeta, traitMeta }) {
            style={{ borderColor: "var(--line)", background: "var(--surface)", color: "var(--dim)" }}>
         <Info size={13} className="mt-[2px] shrink-0" style={{ color: "var(--accent)" }} />
         <span>
-          There are no win rates or tiers on this page. Riot's match API doesn't report which
-          augments players took, so augment performance can't be measured from it — and a tier
-          list built without that data would be guesswork. Use the{" "}
-          <strong style={{ color: "var(--text)" }}>Planner</strong> for recommendations that are
-          measured.
+          Riot’s match history omits augment picks. Browse their effects here, or open the{" "}
+          <a href="#/planner" className="underline">item planner</a> for builds measured from ranked games.
         </span>
       </div>
 
@@ -189,16 +188,19 @@ export default function Augments({ augmentMeta, championMeta, traitMeta }) {
           <tbody>
             {filtered.map((a) => (
               <tr key={a.id} className="row-hover border-b" style={{ borderColor: "var(--line)" }}>
-                <HoverCard as="td" className="px-3 py-2 align-middle cursor-default"
-                           card={<AugmentCard a={a} />}>
-                  <span className="flex items-center gap-2.5 min-w-0">
-                    <span className="shrink-0 rounded p-[2px]"
-                          style={{ border: `1.5px solid ${RARITY[a.rarity] || "var(--line)"}` }}>
-                      <AugmentIcon src={a.icon} name={a.name} size={26} />
-                    </span>
-                    <span className="text-[13px] font-medium truncate">{a.name}</span>
-                  </span>
-                </HoverCard>
+                <td className="px-3 py-2 align-middle">
+                  <details className="augment-effect">
+                    <summary>
+                      <HoverCard card={<AugmentCard a={a} />}>
+                        <span className="flex items-center gap-2.5">
+                          <AugmentIcon src={a.icon} name={a.name} size={26} />
+                          <span className="text-[13px] font-medium">{a.name}</span>
+                        </span>
+                      </HoverCard>
+                    </summary>
+                    <p>{a.description || "No effect text published for this augment."}</p>
+                  </details>
+                </td>
 
                 <td className="px-3 py-2 text-center whitespace-nowrap">
                   {a.rarity ? (

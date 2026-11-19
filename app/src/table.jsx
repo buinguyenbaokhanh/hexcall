@@ -1,5 +1,5 @@
-import React, { useMemo } from "react";
-import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, ChevronUp, ChevronsUpDown } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Formatting shared by every stats tab.
@@ -25,39 +25,14 @@ export const COST_COLORS = {
 
 // ---------------------------------------------------------------------------
 
-/**
- * Page header for a stats tab: what the table is, and how much data is behind
- * it. The sample size and freshness sit together in one block deliberately --
- * a placement average means nothing without the board count it was measured
- * over, and a stale snapshot is worse than an obviously empty one.
- */
-export function PageHeader({ title, blurb, sampleSize, generatedAt, children }) {
+export function PageHeader({ title, blurb, children }) {
   return (
-    <div className="flex items-start justify-between gap-6 flex-wrap mb-4">
-      <div className="min-w-0 max-w-[620px]">
-        <h2 className="display text-[19px] font-semibold">{title}</h2>
-        {blurb && (
-          <p className="text-[12px] mt-1 leading-relaxed" style={{ color: "var(--dim)" }}>{blurb}</p>
-        )}
+    <div className="mb-3">
+      <div className="section-heading">
+        <h2 className="section-title">{title}</h2>
         {children}
       </div>
-      {(sampleSize != null || generatedAt != null) && (
-        <div className="rounded-lg border px-3.5 py-2.5 shrink-0"
-             style={{ borderColor: "var(--line)", background: "var(--surface)" }}>
-          {generatedAt != null && (
-            <div className="flex items-baseline justify-between gap-6">
-              <span className="text-[10.5px]" style={{ color: "var(--dim)" }}>Last updated</span>
-              <span className="mono text-[11.5px]">{timeAgo(generatedAt)}</span>
-            </div>
-          )}
-          {sampleSize != null && (
-            <div className="flex items-baseline justify-between gap-6 mt-1">
-              <span className="text-[10.5px]" style={{ color: "var(--dim)" }}>Boards analysed</span>
-              <span className="mono text-[11.5px] font-bold">{num(sampleSize)}</span>
-            </div>
-          )}
-        </div>
-      )}
+      {blurb && <p className="section-meta">{blurb}</p>}
     </div>
   );
 }
@@ -70,14 +45,14 @@ export function FilterChips({ label, options, value, onChange, counts }) {
     color: active ? "var(--text)" : "var(--dim)",
   });
   return (
-    <div className="flex items-center gap-1.5 flex-wrap">
+    <div className="filter-chips flex items-center gap-1.5 flex-wrap">
       {label && (
         <span className="text-[10px] uppercase tracking-wider mr-0.5" style={{ color: "var(--muted)" }}>
           {label}
         </span>
       )}
       {options.map(([val, text, color]) => (
-        <button key={String(val)} onClick={() => onChange(val)}
+        <button key={String(val)} aria-pressed={value === val} onClick={() => onChange(val)}
                 className="text-[11.5px] font-medium px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1.5"
                 style={style(value === val, color)}>
           {color && <span className="w-2 h-2 rounded-full" style={{ background: color }} />}
@@ -94,7 +69,7 @@ export function SegmentedToggle({ options, value, onChange }) {
   return (
     <div className="inline-flex rounded-md border overflow-hidden shrink-0" style={{ borderColor: "var(--line)" }}>
       {options.map(([val, text]) => (
-        <button key={val} onClick={() => onChange(val)}
+        <button key={val} aria-pressed={value === val} onClick={() => onChange(val)}
                 className="text-[11.5px] px-3 py-1.5 transition-colors"
                 style={{
                   background: value === val ? "var(--raised)" : "transparent",
@@ -196,6 +171,7 @@ export function StatTable({
   columns, rows, rowKey, sort, onSortChange,
   expanded, onToggleRow, renderDetail, pinLast, emptyMessage = "Nothing matches this filter.",
 }) {
+  const [moreColumns, setMoreColumns] = useState(false);
   const sorted = useMemo(() => {
     const col = columns.find((c) => c.key === sort?.key);
     const out = [...rows];
@@ -229,16 +205,21 @@ export function StatTable({
   }
 
   return (
-    <div className="rounded-lg border overflow-x-auto scroll-thin"
-         style={{ borderColor: "var(--line)", background: "var(--surface)" }}>
-      <table className="w-full border-collapse" style={{ minWidth: 720 }}>
+    <>
+      <button className="more-columns" aria-pressed={moreColumns} onClick={() => setMoreColumns(!moreColumns)}>
+        {moreColumns ? "Show fewer columns" : "Show all columns"}
+      </button>
+      <div className={`stat-grid-wrap scroll-thin ${moreColumns ? "" : "compact-stats"}`}>
+      <table>
         <thead>
           <tr className="border-b" style={{ borderColor: "var(--line)" }}>
-            {columns.map((col) => {
+            {columns.map((col, i) => {
               const active = sort?.key === col.key;
               const Arrow = !col.sortFn ? null : !active ? ChevronsUpDown : sort.dir === "asc" ? ChevronUp : ChevronDown;
               return (
-                <th key={col.key} style={{ width: col.width }}
+                <th key={col.key} scope="col" data-secondary={i > 2 || undefined}
+                    aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
+                    style={{ width: col.width }}
                     className={`px-3 py-2.5 font-medium ${alignClass[col.align] || "text-left"}`}>
                   <button
                     onClick={() => headerClick(col)}
@@ -263,9 +244,18 @@ export function StatTable({
               <tr onClick={renderDetail ? () => onToggleRow(key) : undefined}
                   className={`border-b row-hover ${renderDetail ? "cursor-pointer" : ""}`}
                   style={{ borderColor: "var(--line)", background: isOpen ? "var(--raised)" : undefined }}>
-                {columns.map((col) => (
-                  <td key={col.key} className={`px-3 py-2 ${alignClass[col.align] || "text-left"}`}>
-                    {col.cell(row)}
+                {columns.map((col, i) => (
+                  <td key={col.key} data-secondary={i > 2 || undefined} className={`px-3 py-2 ${alignClass[col.align] || "text-left"}`}>
+                    {i === 0 && renderDetail ? (
+                      <div className="row-heading">
+                        <button className="row-toggle" aria-expanded={!!isOpen}
+                                aria-label={`${isOpen ? "Close" : "Open"} details for ${row.name || key}`}
+                                onClick={(e) => { e.stopPropagation(); onToggleRow(key); }}>
+                          {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        </button>
+                        {col.cell(row)}
+                      </div>
+                    ) : col.cell(row)}
                   </td>
                 ))}
               </tr>
@@ -281,6 +271,7 @@ export function StatTable({
           );
         })}
       </table>
-    </div>
+      </div>
+    </>
   );
 }

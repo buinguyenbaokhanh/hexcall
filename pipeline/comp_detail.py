@@ -23,8 +23,8 @@ Nor can round-by-round win rates, levelling timings (when you hit 8), or
 carousel priority -- the API returns one end-of-game snapshot per player, not a
 timeline. Sites that show those read the game client through an overlay.
 
-Building a "positioning" panel from this data would mean inventing it, so there
-isn't one.
+The positioning guide uses an observed lineup at the most common final level.
+The app suggests starting hexes using the set's champion catalogue.
 
 SIZE
 ----
@@ -108,7 +108,25 @@ def _trait_rows(trait_acc: dict, total: int) -> list[dict]:
     return rows[:TOP_TRAITS]
 
 
-def _detail_from(boards: list[dict]) -> dict:
+def _example_lineup(boards: list[dict], playable_ids: set[str] | None) -> dict | None:
+    """Pick a co-occurring roster, preserving duplicates and ignoring board coordinates."""
+    by_level = defaultdict(Counter)
+    for board in boards:
+        level = board.get("level")
+        ids = sorted(cid for u in board.get("units", [])
+                     if (cid := u.get("character_id")) and
+                     (playable_ids is None or cid in playable_ids))
+        if level and ids:
+            by_level[level][tuple(ids)] += 1
+    if not by_level:
+        return None
+    level = max(by_level, key=lambda lv: (sum(by_level[lv].values()), lv))
+    counts = by_level[level]
+    units = min(counts, key=lambda ids: (-counts[ids], abs(len(ids) - level), ids))
+    return {"level": level, "units": list(units)}
+
+
+def _detail_from(boards: list[dict], playable_ids: set[str] | None = None) -> dict:
     """boards = [{placement, level, units, traits}] for one comp (optionally
     filtered to those holding a given augment)."""
     total = len(boards)
@@ -194,6 +212,7 @@ def _detail_from(boards: list[dict]) -> dict:
 
     return {
         "boards": total,
+        "lineup": _example_lineup(boards, playable_ids),
         "avg_placement": round(statistics.mean(b["placement"] for b in boards), 2),
         "units": units[:TOP_UNITS],
         "carries": [
@@ -235,7 +254,7 @@ def _detail_from(boards: list[dict]) -> dict:
     }
 
 
-def build_comp_details(conn, published_comps: dict, resolver=None, **filters) -> dict:
+def build_comp_details(conn, published_comps: dict, resolver=None, playable_ids=None, **filters) -> dict:
     """Returns {slug: detail_document}. One document per published comp."""
     from aggregate import iter_participants
 
@@ -289,7 +308,7 @@ def build_comp_details(conn, published_comps: dict, resolver=None, **filters) ->
 
     out = {}
     for sig, boards in by_comp.items():
-        base = decorate(_detail_from(boards))
+        base = decorate(_detail_from(boards, playable_ids or None))
         if not base:
             continue
 
@@ -300,7 +319,7 @@ def build_comp_details(conn, published_comps: dict, resolver=None, **filters) ->
             if n < MIN_AUG_COND_N:
                 continue
             subset = [b for b in boards if aug in b["augments"]]
-            cd = _detail_from(subset)
+            cd = _detail_from(subset, playable_ids or None)
             if not cd:
                 continue
             cd = decorate(cd)
@@ -317,8 +336,7 @@ def build_comp_details(conn, published_comps: dict, resolver=None, **filters) ->
             "base": base,
             "by_augment": conditional,
             "notes": {
-                "no_positioning": "Board positions are not exposed by tft-match-v1, "
-                                  "so this tool does not show a positioning map.",
+                "no_positioning": "The match history records the lineup. Starting hexes in the guide are recommendations.",
                 "no_timeline": "The API returns one end-of-game snapshot per player. "
                                "Level shown is where players finished, not when they "
                                "levelled.",

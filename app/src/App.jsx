@@ -1,9 +1,10 @@
-import React, { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
-  X, Info, Sparkles, ChevronRight, AlertTriangle, Database,
-  RefreshCw, WifiOff, Check, Layers, Zap, Users, History, Swords, Hexagon,
-  TrendingUp,
+  X, Info, AlertTriangle, Database, CalendarDays, Search, Layers,
+  RefreshCw, WifiOff,
 } from "lucide-react";
+import SiteSearch from "./SiteSearch.jsx";
+import Navigation, { currentPage, pageFor } from "./Navigation.jsx";
 import Review from "./Review.jsx";
 import CompBuild from "./CompBuild.jsx";
 import Advisor from "./Advisor.jsx";
@@ -14,6 +15,8 @@ import CompsTab from "./Comps.jsx";
 import ItemsTab from "./Items.jsx";
 import TraitsTab from "./Traits.jsx";
 import TrendsTab from "./Trends.jsx";
+import ChatDock from "./ChatDock.jsx";
+import { FocusProvider } from "./focus.jsx";
 import { ChampionIcon, AugmentIcon, carryIdFromSig } from "./icons.jsx";
 import { timeAgo } from "./table.jsx";
 import {
@@ -101,25 +104,32 @@ function useStatsFeed() {
   const [stats, setStats] = useState(FALLBACK_STATS);
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState(null);
+  const requestNumber = useRef(0);
+  const hasSnapshot = useRef(false);
 
   const refresh = useCallback(async (wanted) => {
-    setStatus((s) => (s === "live" ? "live" : "loading"));
+    const request = ++requestNumber.current;
+    if (!hasSnapshot.current) setStatus("loading");
     try {
       const mr = await fetch(urlFor("manifest"), { cache: "no-cache" });
       if (!mr.ok) throw new Error(`manifest ${mr.status}`);
       const m = await mr.json();
-      setManifest(m);
-      const id = wanted || m.default_slice || m.slices[0]?.id;
+      const id = m.slices.some((s) => s.id === wanted) ? wanted : m.default_slice || m.slices[0]?.id;
       if (!id) throw new Error("manifest lists no slices");
-      const sr = await fetch(urlFor(id));
+      const sr = await fetch(`${urlFor(id)}?v=${m.generated_at || ""}`);
       if (!sr.ok) throw new Error(`slice ${sr.status}`);
-      setStats(await sr.json());
+      const next = await sr.json();
+      if (request !== requestNumber.current) return;
+      hasSnapshot.current = true;
+      setManifest(m);
+      setStats(next);
       setSliceId(id);
       setStatus("live");
       setError(null);
     } catch (e) {
+      if (request !== requestNumber.current) return;
       setError(String(e.message || e));
-      setStatus((p) => (p === "live" ? "error" : "offline"));
+      setStatus(hasSnapshot.current ? "error" : "offline");
     }
   }, []);
 
@@ -145,30 +155,73 @@ function useStatsFeed() {
 // served with a long max-age (they change only on republish), so without a
 // versioned URL a browser will keep serving the copy it already has -- which
 // silently hides any field added since, rather than failing visibly.
+const EMPTY_CATALOG = {};
 function useCatalog(name, version) {
-  const [catalog, setCatalog] = useState({});
+  const [loaded, setLoaded] = useState(null);
   useEffect(() => {
+    if (!version) return;
+    let cancelled = false;
     const base = STATIC_MODE ? `${API_BASE}/${name}.json` : `${API_BASE}/${name}`;
     const url = version ? `${base}?v=${version}` : base;
     fetch(url)
       .then((r) => (r.ok ? r.json() : {}))
-      .then(setCatalog)
+      .then((data) => { if (!cancelled) setLoaded({ version, data }); })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [name, version]);
-  return catalog;
+  return loaded && loaded.version === version ? loaded.data : EMPTY_CATALOG;
 }
 
 export default function App() {
   const { manifest, stats, sliceId, setSlice, status, error } = useStatsFeed();
   const catalogVersion = manifest?.generated_at;
   const itemMeta = useCatalog("item-meta", catalogVersion);
-  const championMeta = useCatalog("champion-meta", catalogVersion);
+  // Backfilled ranges and lineups share the original match snapshot timestamp.
+  const positioningVersion = catalogVersion && `${catalogVersion}-positions-1`;
+  const championMeta = useCatalog("champion-meta", positioningVersion);
   const augmentMeta = useCatalog("augment-meta", catalogVersion);
   const traitMeta = useCatalog("trait-meta", catalogVersion);
-  const [tab, setTab] = useState("advisor");
+  const [tab, setTab] = useState(currentPage);
+  const mainRef = useRef(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  useEffect(() => {
+    function shortcut(event) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        if (!document.querySelector('[aria-modal="true"]') || document.querySelector(".site-search[open]")) {
+          setSearchOpen((open) => !open);
+        }
+      }
+    }
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, []);
   const [openComp, setOpenComp] = useState(null);
   const [showInfo, setShowInfo] = useState(false);
-  const [sliceMenu, setSliceMenu] = useState(false);
+  useEffect(() => {
+    const onRoute = () => {
+      setTab(currentPage());
+      setSearchOpen(false);
+      setOpenComp(null);
+      setShowInfo(false);
+      mainRef.current?.focus({ preventScroll: true });
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener("hashchange", onRoute);
+    return () => window.removeEventListener("hashchange", onRoute);
+  }, []);
+
+  useEffect(() => {
+    if (!showInfo && !openComp) return;
+    const dismiss = (event) => {
+      if (event.key === "Escape") { setOpenComp(null); setShowInfo(false); }
+    };
+    window.addEventListener("keydown", dismiss);
+    return () => window.removeEventListener("keydown", dismiss);
+  }, [showInfo, openComp]);
+
+  const page = pageFor(tab);
+  useEffect(() => { document.title = page.title + " · HexCall"; }, [page]);
 
   // One ranking, unconditioned. The augment-conditional projection this used to
   // carry is gone: tft-match-v1 doesn't report augments, so augment_comp_pairs
@@ -186,199 +239,97 @@ export default function App() {
     ? (baseline.find((c) => c.sig === openComp.sig) || openComp)
     : null;
 
+  const setNumber = stats.tft_set || (sliceId ? manifest?.tft_set : null);
+  const patch = stats.patch_label || stats.patch;
+  const dataset = [setNumber && `Set ${setNumber}`, patch && `Patch ${patch}`].filter(Boolean).join(" · ");
+  const seedTiers = Object.keys(stats.population?.tiers || {}).sort()
+    .map((tier) => tier.charAt(0) + tier.slice(1).toLowerCase()).join(" & ");
+  const matchDate = stats.last_match_at && new Date(stats.last_match_at * 1000)
+    .toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
   return (
+    <FocusProvider>
     <div className="min-h-screen w-full" style={{ background: "var(--bg)", color: "var(--text)" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
-        :root {
-          --bg:      #090B10;
-          --surface: #11141C;
-          --raised:  #161A24;
-          --line:    #232936;
-          --faint:   #2C3444;
-          --ink-3:   #3D4658;
-          /* Secondary text. --faint (#2C3444) reads at 1.58:1 on --bg, well
-             under the 4.5:1 WCAG AA needs for body text, and it was carrying
-             real content -- sample sizes, section labels, every statistical
-             caveat. --faint stays for what it's actually suited to: bars,
-             fills and the scrollbar thumb, none of which are read. */
-          /* Sized against --raised, the lightest surface it sits on, so it
-             clears 4.5:1 everywhere rather than only on the page background:
-             5.10 on --bg, 4.77 on --surface, 4.51 on --raised. */
-          --muted:   #7282A4;
-          --dim:     #78839A;
-          --text:    #E4E8F0;
-          --signal:  #46E0B0;
-          --accent:  #FFC24B;
-          --warn:    #E8A33D;
-          --danger:  #FF7A85;
-        }
-        * { box-sizing: border-box; }
-        body { font-family: 'Inter', system-ui, sans-serif; }
-        .display { font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.01em; }
-        .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
-        /* Height as well as width: the tab strip and the stats tables scroll
-           HORIZONTALLY, and a rule that sets only width leaves those with the
-           browser's ~15px default bar -- a grey slab across the header once
-           the tabs outgrow the viewport. */
-        .scroll-thin::-webkit-scrollbar { width: 5px; height: 5px; }
-        .scroll-thin::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 3px; }
-        .scroll-thin::-webkit-scrollbar-track { background: transparent; }
-        /* Keyboard focus. Inputs set outline-none for their own focus style,
-           which left every button and link with no visible focus at all --
-           tabbing through the app gave no indication of where you were.
-           :focus-visible keeps mouse clicks from drawing a ring. */
-        :focus-visible {
-          outline: 2px solid var(--accent);
-          outline-offset: 2px;
-          border-radius: 3px;
-        }
-        .row-hover { transition: background 140ms ease, border-color 140ms ease; }
-        .row-hover:hover { background: var(--raised); border-color: var(--ink-3); }
-        @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
-      `}</style>
-
-      {/* Header */}
-      <header className="border-b sticky top-0 z-30 backdrop-blur"
-              style={{ borderColor: "var(--line)", background: "color-mix(in srgb, var(--bg) 88%, transparent)" }}>
-        <div className="max-w-[1180px] mx-auto px-6 h-[62px] flex items-center justify-between gap-4">
-          <div className="flex items-baseline gap-3 min-w-0">
-            {/* The page had no h1 at all -- the wordmark was a span, which
-                left screen readers and search engines with no document
-                heading. Styling is unchanged. */}
-            <h1 className="display text-[19px] font-bold tracking-tight">
-              HEXCALL
-            </h1>
-            <span className="text-[11px] mono truncate" style={{ color: "var(--dim)" }}>
-              {/* The API reports only the League client build, which is not
-                  what players call the patch. When PATCH_NAMES maps it, show
-                  the familiar label and keep the build in the tooltip so the
-                  two can still be reconciled. */}
-              <span title={stats.patch_source === "calendar"
-                             ? `TFT patch ${stats.patch_label} · assigned from match dates (the Set ${manifest?.tft_set ?? ""} client reports no version)`
-                             : stats.patch_label && stats.patch_label !== stats.patch
-                             ? `TFT patch ${stats.patch_label} · client build ${stats.patch}`
-                             : `client build ${stats.patch}`}>
-                {manifest?.tft_set && `Set ${manifest.tft_set} · `}patch {stats.patch_label || stats.patch || "—"}
-              </span>
-              {" · "}{stats.sample_size.toLocaleString()} boards · {timeAgo(stats.generated_at)}
-              {status === "live" && <span style={{ color: "var(--signal)" }}> · live</span>}
-            </span>
+      <button className="skip-nav" onClick={() => mainRef.current?.focus()}>Skip to page content</button>
+      <header className="site-header">
+        <div className="header-inner">
+          <a href="#/advisor" className="wordmark" aria-label="HexCall home">
+            <span className="brand-mark" aria-hidden="true"><Layers size={20} /></span>HexCall
+          </a>
+          <button className="jump-trigger" onClick={() => setSearchOpen(true)} aria-haspopup="dialog" aria-label="Search HexCall">
+            <Search size={16} /><span>Search HexCall</span>
+            <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl"} K</kbd>
+          </button>
+          <div className="header-tools">
+            <button onClick={() => setSlice(sliceId)} title="Refresh data" aria-label="Refresh data">
+              <RefreshCw size={15} className={status === "loading" ? "animate-spin" : ""} />
+            </button>
+            <button onClick={() => setShowInfo(true)} title="How HexCall Works" aria-label="How HexCall Works"><Info size={16} /></button>
           </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            {manifest?.slices?.length > 0 && (
-              <div className="relative">
-                <button onClick={() => setSliceMenu((v) => !v)}
-                        className="flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded border row-hover"
-                        style={{ borderColor: "var(--line)" }}>
-                  <Database size={12} style={{ color: "var(--dim)" }} />
-                  {activeSlice?.label || "Data slice"}
-                  <ChevronRight size={11} className="rotate-90" style={{ color: "var(--dim)" }} />
-                </button>
-                {sliceMenu && (
-                  <div className="absolute right-0 mt-1.5 w-64 rounded border py-1 z-40"
-                       style={{ background: "var(--raised)", borderColor: "var(--line)" }}>
-                    {manifest.slices.map((s) => (
-                      <button key={s.id}
-                              onClick={() => { setSlice(s.id); setSliceMenu(false); }}
-                              className="w-full text-left px-3 py-2 flex items-center justify-between gap-2 row-hover">
-                        <div className="min-w-0">
-                          <p className="text-[12px] truncate">{s.label}</p>
-                          <p className="text-[10px] mono" style={{ color: "var(--dim)" }}>
-                            {s.sample_size.toLocaleString()} boards
-                          </p>
-                        </div>
-                        {s.id === sliceId && <Check size={13} style={{ color: "var(--signal)" }} />}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            <button onClick={() => setSlice(sliceId)} title="Refresh"
-                    className="p-1.5 rounded border row-hover" style={{ borderColor: "var(--line)" }}>
-              <RefreshCw size={12} className={status === "loading" ? "animate-spin" : ""}
-                         style={{ color: "var(--dim)" }} />
-            </button>
-            <button onClick={() => setShowInfo(true)}
-                    className="p-1.5 rounded border row-hover" style={{ borderColor: "var(--line)" }}>
-              <Info size={12} style={{ color: "var(--dim)" }} />
-            </button>
-          </div>
-        </div>
-
-        {/* Announced as a tab set rather than nine unrelated buttons: without
-            the roles a screen reader gives no sense of how many there are or
-            which one is showing. */}
-        <div role="tablist" aria-label="Sections"
-             className="max-w-[1180px] mx-auto px-6 flex gap-1 -mb-px overflow-x-auto scroll-thin">
-          {[
-            ["advisor", "Advisor", Sparkles],
-            ["planner", "Items I hold", Layers],
-            ["comps", "Comps", Swords],
-            ["augments", "Augments", Zap],
-            ["champions", "Units", Zap],
-            ["items", "Items", Hexagon],
-            ["traits", "Traits", Users],
-            ["trends", "Trends", TrendingUp],
-            ["review", "Review My Games", History],
-          ].map(([id, label, Icon]) => (
-            <button key={id} onClick={() => setTab(id)}
-                    role="tab" aria-selected={tab === id} id={`tab-${id}`}
-                    className="display text-[13px] font-medium py-2.5 px-3 flex items-center gap-1.5 border-b-2 whitespace-nowrap transition-colors"
-                    style={{
-                      borderColor: tab === id ? "var(--accent)" : "transparent",
-                      color: tab === id ? "var(--text)" : "var(--dim)",
-                    }}>
-              <Icon size={13} style={{ color: tab === id ? "var(--accent)" : "var(--muted)" }} />
-              {label}
-            </button>
-          ))}
         </div>
       </header>
 
-      {/* One panel that swaps content, so it points back at whichever tab is
-          selected rather than there being nine panels in the DOM. */}
-      <main role="tabpanel" aria-labelledby={`tab-${tab}`}
-            className="max-w-[1180px] mx-auto px-6 py-6">
-        <StatusBanner status={status} error={error} onRetry={() => setSlice(sliceId)} />
-        {status === "live" && (
-          <StaleBanner generatedAt={stats.generated_at} tftSet={manifest?.tft_set}
-                       patch={stats.patch_label || stats.patch} />
-        )}
+      <div className="workspace-shell">
+        <Navigation active={tab} onBrowse={() => setSearchOpen(true)} />
+        <main ref={mainRef} tabIndex={-1} aria-labelledby="page-title" className="page-content">
+          <header className={`page-hero${setNumber === 18 && status !== "loading" ? " wilds-hero" : ""}`}>
+            <div className="hero-copy">
+              <p className="hero-set" title={stats.patch_source === "calendar" ? "Patch assigned from ranked match dates" : undefined}>{status === "loading" ? "Teamfight Tactics" :
+                [dataset || "Ranked TFT", setNumber === 18 && "Enchanted Wilds"].filter(Boolean).join("  /  ")}</p>
+              <h1 id="page-title">{page.title}</h1>
+              <p className="hero-description">{page.description}</p>
+            </div>
+          </header>
+          {status !== "loading" && <div className="dataset-line">
+            <span><Database size={13} /><strong>{stats.sample_size.toLocaleString()} boards</strong></span>
+            {manifest?.slices?.length > 1 ? (
+              <select aria-label="Ranked match sample" value={sliceId} onChange={(e) => setSlice(e.target.value)}>
+                {manifest.slices.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            ) : activeSlice && <span>{activeSlice.label}</span>}
+            {seedTiers && <span>{seedTiers} ladder sample</span>}
+            <span><CalendarDays size={13} />{matchDate ? `Through ${matchDate} UTC` : `Updated ${timeAgo(stats.generated_at)}`}</span>
+          </div>}
+          <StatusBanner status={status} error={error} onRetry={() => setSlice(sliceId)} />
+          {status === "live" && (
+            <StaleBanner generatedAt={stats.generated_at} tftSet={manifest?.tft_set}
+                         patch={stats.patch_label || stats.patch} />
+          )}
 
-        {tab === "advisor" && (
-          <Advisor stats={stats} augmentMeta={augmentMeta} itemMeta={itemMeta}
-                   traitMeta={traitMeta} onOpenComp={setOpenComp} />
-        )}
+          {status !== "loading" && <>
+            {tab === "advisor" && (
+              <Advisor stats={stats} augmentMeta={augmentMeta} itemMeta={itemMeta}
+                       traitMeta={traitMeta} onOpenComp={setOpenComp} />
+            )}
 
-        {tab === "planner" && (
-          <Planner stats={stats} itemMeta={itemMeta} onOpenComp={setOpenComp} />
-        )}
+            {tab === "planner" && (
+              <Planner stats={stats} itemMeta={itemMeta} onOpenComp={setOpenComp} />
+            )}
 
-        {tab === "comps" && (
-          <CompsTab stats={stats} traitMeta={traitMeta} itemMeta={itemMeta}
-                    apiBase={API_BASE} staticMode={STATIC_MODE} sliceId={sliceId}
-                    onOpenComp={setOpenComp} />
-        )}
+            {tab === "comps" && (
+              <CompsTab stats={stats} championMeta={championMeta} version={positioningVersion} traitMeta={traitMeta} itemMeta={itemMeta}
+                        apiBase={API_BASE} staticMode={STATIC_MODE} sliceId={sliceId}
+                        onOpenComp={setOpenComp} />
+            )}
 
-        {tab === "augments" && <AugmentsTab augmentMeta={augmentMeta} championMeta={championMeta} traitMeta={traitMeta} />}
+            {tab === "augments" && <AugmentsTab augmentMeta={augmentMeta} championMeta={championMeta} traitMeta={traitMeta} />}
 
-        {tab === "champions" && <ChampionsTab stats={stats} championMeta={championMeta}
-                                              itemMeta={itemMeta} traitMeta={traitMeta} />}
+            {tab === "champions" && <ChampionsTab stats={stats} championMeta={championMeta}
+                                                  itemMeta={itemMeta} traitMeta={traitMeta} />}
 
-        {tab === "items" && <ItemsTab stats={stats} itemMeta={itemMeta} />}
+            {tab === "items" && <ItemsTab stats={stats} itemMeta={itemMeta} />}
 
-        {tab === "traits" && <TraitsTab stats={stats} traitMeta={traitMeta}
-                                        championMeta={championMeta} />}
+            {tab === "traits" && <TraitsTab stats={stats} traitMeta={traitMeta}
+                                            championMeta={championMeta} />}
 
-        {tab === "trends" && <TrendsTab stats={stats} apiBase={API_BASE} staticMode={STATIC_MODE}
-                                        sliceId={sliceId} traitMeta={traitMeta} />}
+            {tab === "trends" && <TrendsTab stats={stats} apiBase={API_BASE} staticMode={STATIC_MODE}
+                                            sliceId={sliceId} traitMeta={traitMeta} />}
 
-        {tab === "review" && <Review apiBase={API_BASE} sliceId={sliceId} staticMode={STATIC_MODE}
-                                     traitMeta={traitMeta} />}
-      </main>
+            {tab === "review" && <Review apiBase={API_BASE} sliceId={sliceId} staticMode={STATIC_MODE}
+                                         traitMeta={traitMeta} />}
+          </>}
+        </main>
+      </div>
 
       {/* Riot's third-party policy requires this acknowledgement in the
           product itself, not only in the repo's README. */}
@@ -398,11 +349,20 @@ export default function App() {
             <a href={`${import.meta.env.BASE_URL}terms.html`}
                className="underline" style={{ color: "var(--dim)" }}>Terms</a>
             <button onClick={() => setShowInfo(true)} className="underline" style={{ color: "var(--dim)" }}>
-              How it works
+              How HexCall Works
             </button>
           </nav>
         </div>
       </footer>
+
+      {/* Available from every tab -- it can see what you're reading, which a
+          tab could not. Never opens itself; "/" opens it, Escape closes. */}
+      <ChatDock apiBase={API_BASE} staticMode={STATIC_MODE} sliceId={sliceId}
+                datasetLabel={dataset}
+                tabLabel={page.navLabel || page.title} />
+
+      {searchOpen && <SiteSearch onClose={() => setSearchOpen(false)} stats={stats}
+                        championMeta={championMeta} augmentMeta={augmentMeta} traitMeta={traitMeta} itemMeta={itemMeta} />}
 
       {/* Comp detail */}
       {openComp && (
@@ -412,7 +372,7 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8"
              style={{ background: "rgba(4,6,10,0.82)", backdropFilter: "blur(2px)" }}
              onClick={() => setOpenComp(null)}>
-          <div onClick={(e) => e.stopPropagation()}
+          <div role="dialog" aria-modal="true" aria-labelledby="build-title" onClick={(e) => e.stopPropagation()}
                className="w-full max-w-3xl lg:max-w-5xl rounded-xl border shadow-2xl flex flex-col"
                style={{ background: "var(--raised)", borderColor: "var(--line)", maxHeight: "min(88vh, 900px)" }}>
 
@@ -421,7 +381,7 @@ export default function App() {
                  style={{ borderColor: "var(--line)" }}>
               <ChampionIcon src={stats.champion_icons?.[carryIdFromSig(openCompLive.sig)]} name={openCompLive.name} size={44} />
               <div className="min-w-0 flex-1">
-                <h3 className="display text-[19px] truncate">{openCompLive.name}</h3>
+                <h3 id="build-title" className="display text-[19px] truncate">{openCompLive.name}</h3>
                 <p className="mono text-[10px] mt-0.5 truncate" style={{ color: "var(--muted)" }}>{openCompLive.sig}</p>
               </div>
               <button onClick={() => setOpenComp(null)} className="shrink-0 p-1 rounded row-hover"
@@ -452,7 +412,8 @@ export default function App() {
 
             {/* Build detail */}
             <div className="mb-5 pb-5 border-b" style={{ borderColor: "var(--line)" }}>
-              <CompBuild apiBase={API_BASE} staticMode={STATIC_MODE} sliceId={sliceId}
+              <CompBuild championMeta={championMeta} version={positioningVersion}
+                         apiBase={API_BASE} staticMode={STATIC_MODE} sliceId={sliceId}
                          slug={stats.comp_slugs?.[openCompLive.sig]}
                          selectedAugments={[]} augmentNames={stats.augment_names}
                          augmentIcons={stats.augment_icons} itemMeta={itemMeta}
@@ -508,14 +469,14 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8"
              style={{ background: "rgba(4,6,10,0.82)", backdropFilter: "blur(2px)" }}
              onClick={() => setShowInfo(false)}>
-          <div onClick={(e) => e.stopPropagation()}
+          <div role="dialog" aria-modal="true" aria-labelledby="about-title" onClick={(e) => e.stopPropagation()}
                className="w-full max-w-md rounded-xl border p-5 relative shadow-2xl overflow-y-auto scroll-thin"
                style={{ maxHeight: "min(88vh, 900px)",
                         background: "var(--raised)", borderColor: "var(--line)" }}>
-            <button onClick={() => setShowInfo(false)} className="absolute top-4 right-4" style={{ color: "var(--dim)" }}>
+            <button aria-label="Close" onClick={() => setShowInfo(false)} className="absolute top-4 right-4" style={{ color: "var(--dim)" }}>
               <X size={15} />
             </button>
-            <h3 className="display text-[15px] mb-3">How this works</h3>
+            <h3 id="about-title" className="display text-[15px] mb-3">How HexCall Works</h3>
 
             <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "var(--dim)" }}>reading the track</p>
             <p className="text-[12.5px] leading-relaxed mb-3">
@@ -545,5 +506,6 @@ export default function App() {
         </div>
       )}
     </div>
+    </FocusProvider>
   );
 }
