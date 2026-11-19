@@ -41,11 +41,13 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from aggregate import build_stats
+from aggregate import build_stats, puuids_for_tiers
 from comp_detail import build_comp_details, slug
 from static_data import team_planner_codes, team_planner_code
 from trends import build_trends
-from providers import PATCH_NAMES
+from calendar import timegm
+
+from providers import PATCH_NAMES, PATCH_CALENDAR
 
 log = logging.getLogger("publish")
 
@@ -57,17 +59,17 @@ CURRENT = PUBLIC_DIR / "current"
 # a slice with too few matches produces noisy stats, so check sample_size
 # in the manifest before exposing a new one in the UI.
 SLICES = [
-    {"id": "global-all",     "label": "Sampled ranked lobbies",  "platform": None, "tiers": None},
+    {"id": "global-all",     "label": "All regions, all ranks",  "platform": None, "tiers": None},
     {"id": "global-apex",    "label": "Challenger + GM",         "platform": None, "tiers": ["CHALLENGER", "GRANDMASTER"]},
     {"id": "na1-apex",       "label": "NA Challenger + GM",      "platform": "na1", "tiers": ["CHALLENGER", "GRANDMASTER"]},
     {"id": "euw1-apex",      "label": "EUW Challenger + GM",     "platform": "euw1", "tiers": ["CHALLENGER", "GRANDMASTER"]},
     {"id": "kr-apex",        "label": "KR Challenger + GM",      "platform": "kr", "tiers": ["CHALLENGER", "GRANDMASTER"]},
     # SEA. sg2 is the Singapore platform and routes to the `sea` match cluster,
     # not `asia` -- see PLATFORM_TO_REGION. Crawl it with
-    # `./run-crawl.sh sg2 17`; until then these skip on sample like any other
+    # `./run-crawl.sh sg2 18`; until then these skip on sample like any other
     # slice, which costs nothing.
     {"id": "sg2-apex",       "label": "SEA Challenger + GM",     "platform": "sg2", "tiers": ["CHALLENGER", "GRANDMASTER"]},
-    {"id": "sg2-all",        "label": "Singapore ranked lobbies",          "platform": "sg2", "tiers": None},
+    {"id": "sg2-all",        "label": "SEA, all ranks",          "platform": "sg2", "tiers": None},
 ]
 
 MIN_SAMPLE_TO_PUBLISH = 4000  # participants; below this the slice is noise
@@ -165,11 +167,14 @@ def slice_scope(conn, sd, patch, tft_set):
         windows AS (
             SELECT platform, MIN(game_datetime)/1000 AS first_game,
                    MAX(fetched_at) AS last_fetch FROM games GROUP BY platform
+        ), newer_sets AS (
+            SELECT platform, MIN(game_datetime) AS first_game FROM matches
+            WHERE queue_id=1100 AND tft_set > ? GROUP BY platform
         ), seeds AS (
             SELECT p.puuid, p.platform, p.tier FROM players p JOIN windows w USING(platform)
+            LEFT JOIN newer_sets n USING(platform)
             WHERE p.seen_at BETWEEN w.first_game AND w.last_fetch
-              AND NOT EXISTS (SELECT 1 FROM matches n WHERE n.platform=p.platform
-                  AND n.queue_id=1100 AND n.tft_set > ? AND n.game_datetime <= p.seen_at*1000)
+              AND (n.first_game IS NULL OR n.first_game > p.seen_at*1000)
         )
         SELECT s.puuid, s.tier, MAX(g.game_datetime)
         FROM games g JOIN json_each(g.raw, '$.metadata.participants') member
@@ -178,19 +183,28 @@ def slice_scope(conn, sd, patch, tft_set):
     """, [*params, tft_set]).fetchall()
     if sd.get("tiers"):
         rows = [r for r in rows if r[1] in sd["tiers"]]
-        filters["puuid_filter"] = {r[0] for r in rows}
+        mixed_store = conn.execute(
+            "SELECT 1 FROM matches WHERE queue_id = 1100 AND tft_set != ? LIMIT 1",
+            (tft_set,)).fetchone()
+        filters["puuid_filter"] = ({r[0] for r in rows} if mixed_store else
+                                   puuids_for_tiers(conn, sd["tiers"], sd.get("platform")))
         last_match = max((r[2] for r in rows), default=None)
     tiers = Counter(tier for _, tier, _ in rows if tier)
     return filters, dict(tiers), last_match // 1000 if last_match else None
 
 
-def patch_counts(conn: sqlite3.Connection, tft_set: int | None = None) -> dict[tuple[int, int], int]:
-    """Ranked matches per parseable build in the selected set."""
+def _set_clause(tft_set: int | None) -> tuple[str, tuple]:
+    return (" AND tft_set = ?", (tft_set,)) if tft_set is not None else ("", ())
+
+
+def patch_counts(conn: sqlite3.Connection,
+                 tft_set: int | None = None) -> dict[tuple[int, int], int]:
+    """{(major, minor): matches}, across the whole store or within one set."""
+    clause, params = _set_clause(tft_set)
     counts: dict[tuple[int, int], int] = {}
     for gv, n in conn.execute(
             "SELECT game_version, COUNT(*) FROM matches "
-            "WHERE queue_id = 1100 AND (? IS NULL OR tft_set = ?) "
-            "AND game_version IS NOT NULL GROUP BY game_version", (tft_set, tft_set)):
+            f"WHERE game_version IS NOT NULL{clause} GROUP BY game_version", params):
         m = _PATCH_RE.search(gv)
         if not m:
             continue
@@ -200,7 +214,8 @@ def patch_counts(conn: sqlite3.Connection, tft_set: int | None = None) -> dict[t
 
 
 def current_patch(conn: sqlite3.Connection,
-                  min_matches: int = MIN_PATCH_MATCHES, *, tft_set: int | None = None) -> str | None:
+                  min_matches: int = MIN_PATCH_MATCHES,
+                  tft_set: int | None = None) -> str | None:
     """The newest patch that holds enough matches to publish a usable build.
 
     Newest rather than most-sampled, but gated on sample. Un-gated "newest"
@@ -220,10 +235,16 @@ def current_patch(conn: sqlite3.Connection,
     stand on its own. If nothing clears the floor -- a fresh store, or the first
     crawl of a new set -- fall back to the best-sampled patch so the build
     produces something rather than refusing.
+
+    Pass tft_set whenever the build is pinned to one. Counted across the whole
+    store, the first days of a new set lose to the old set's last patch: a
+    store holding thousands of 16.16 (Set 17) matches and a few hundred on Set
+    18 returns 16.16, the build then filters to "Set 18 AND 16.16", matches
+    zero rows, and publishes nothing until one Set 18 patch clears the floor on
+    its own -- the fallback below never gets a chance to run.
     """
     counts = patch_counts(conn, tft_set)
     if not counts:
-        # An unnumbered set is published with its set and match dates.
         return None
     for key in sorted(counts, reverse=True):
         if counts[key] >= min_matches:
@@ -235,6 +256,90 @@ def current_patch(conn: sqlite3.Connection,
 def patch_filter(patch: str) -> str:
     """LIKE pattern matching a patch in either game_version shape."""
     return f"%Version {patch}.%"
+
+
+# Calendar-assigned patches are written into the game_version column in the
+# same "Version X.Y." shape the client used to report, so every existing
+# consumer -- patch_counts, patch_filter, the prune -- reads them unchanged. The
+# raw match JSON keeps what the client actually sent.
+CALENDAR_PREFIX = "Calendar Version "
+UNASSIGNED = "Unassigned (patch rollout window or past the calendar)"
+
+# A patch rolls out region by region: the Asian servers take it during their
+# morning, which is the previous evening in UTC, and the Americas last. Games
+# from this window around each listed date could be on either patch.
+ROLLOUT_BEFORE_S = 12 * 3600
+ROLLOUT_AFTER_S = 24 * 3600
+# Patches land every two weeks. Past this, the table has not been updated for
+# the next patch, and assigning later games to the last entry would blend two
+# patches under one label.
+CALENDAR_MAX_PATCH_DAYS = 16
+
+
+def _calendar_starts(table: dict[str, str]) -> list[tuple[float, str]]:
+    """[(UTC epoch seconds of the listed date, patch)], oldest first."""
+    return sorted((timegm(time.strptime(d, "%Y-%m-%d")), p) for p, d in table.items())
+
+
+def calendar_patch(game_datetime_ms: int | None,
+                   table: dict[str, str] | None = None) -> str | None:
+    """The patch a match was played on, from when it was played, or None.
+
+    None inside a rollout window, before the first entry, or too long after
+    the last one -- an unassigned match is left out of every patch rather than
+    risk putting it in the wrong one.
+    """
+    if not game_datetime_ms:
+        return None
+    starts = _calendar_starts(PATCH_CALENDAR if table is None else table)
+    t = game_datetime_ms / 1000
+    for i, (start, patch) in enumerate(starts):
+        if t < start - ROLLOUT_BEFORE_S:
+            return None
+        if t < start + ROLLOUT_AFTER_S:
+            return None                      # rolling out: could be either
+        nxt = starts[i + 1][0] if i + 1 < len(starts) else None
+        if nxt is not None and t >= nxt - ROLLOUT_BEFORE_S:
+            continue
+        if nxt is None and t >= start + CALENDAR_MAX_PATCH_DAYS * 86400:
+            return None
+        return patch
+    return None
+
+
+def assign_calendar_patches(conn: sqlite3.Connection) -> None:
+    """Give matches whose client reported no version a patch from the calendar.
+
+    Re-derived every run for every match without a real version, so editing
+    PATCH_CALENDAR (a new patch, a corrected date) takes effect on the next
+    publish without re-crawling.
+    """
+    rows = conn.execute(
+        "SELECT match_id, game_datetime, game_version FROM matches "
+        "WHERE game_version IS NULL OR game_version NOT GLOB '*[0-9].[0-9]*' "
+        f"OR game_version LIKE '{CALENDAR_PREFIX}%'").fetchall()
+    if not rows:
+        return
+    updates, assigned, late = [], Counter(), 0
+    starts = _calendar_starts(PATCH_CALENDAR)
+    cutoff = starts[-1][0] + CALENDAR_MAX_PATCH_DAYS * 86400 if starts else None
+    for mid, dt, old in rows:
+        patch = calendar_patch(dt)
+        new = f"{CALENDAR_PREFIX}{patch}.0" if patch else UNASSIGNED
+        if patch:
+            assigned[patch] += 1
+        elif dt and cutoff and dt / 1000 >= cutoff:
+            late += 1
+        if new != old:
+            updates.append((new, mid))
+    conn.executemany("UPDATE matches SET game_version = ? WHERE match_id = ?", updates)
+    conn.commit()
+    log.info("calendar patches for %d unversioned matches: %s, %d unassigned",
+             len(rows), dict(sorted(assigned.items())), len(rows) - sum(assigned.values()))
+    if late:
+        log.warning("%d matches are more than %d days past the newest patch in "
+                    "PATCH_CALENDAR (%s) -- add the next patch's date in providers.py",
+                    late, CALENDAR_MAX_PATCH_DAYS, starts[-1][1])
 
 
 def auto_comp_name(shape: dict, resolver) -> str | None:
@@ -324,16 +429,19 @@ def name_comps(shapes: dict, overrides: dict | None, resolver) -> dict:
 
 
 def build_slice(conn: sqlite3.Connection, slice_def: dict, patch: str | None,
-                tft_set: int | None, resolver=None, comp_names: dict | None = None,
-                scope=None) -> dict:
+                tft_set: int | None, resolver=None, comp_names: dict | None = None, scope=None) -> dict:
     filters, tiers, last_match = scope or slice_scope(conn, slice_def, patch, tft_set)
     stats = build_stats(conn, **filters)
-    stats.update(slice_id=slice_def["id"], slice_label=slice_def["label"], patch=patch,
-                 tft_set=tft_set, last_match_at=last_match, population={"tiers": tiers})
+    stats.update(tft_set=tft_set, last_match_at=last_match, population={"tiers": tiers})
+
+    stats["slice_id"] = slice_def["id"]
+    stats["slice_label"] = slice_def["label"]
+    stats["patch"] = patch
     # What players call this patch, when someone has told us. The build number
     # is accurate but not the label anyone else uses.
     stats["patch_label"] = PATCH_NAMES.get(patch, patch)
     stats["patch_build"] = patch
+    stats["patch_source"] = patch_source(conn, patch)
     stats["generated_at"] = int(time.time())
     stats["comp_names"] = name_comps(stats.get("comp_shapes", {}), comp_names, resolver)
     carry_ids = {sig.partition(" :: ")[2] for sig in stats["comps"]} - {""}
@@ -390,15 +498,48 @@ def _write(path: Path, payload: dict) -> dict:
     }
 
 
+def patch_source(conn: sqlite3.Connection, patch: str | None) -> str | None:
+    """"build" when the client reported the patch, "calendar" when it was
+    assigned from PATCH_CALENDAR -- so the UI can say which it is showing."""
+    if not patch:
+        return None
+    hit = conn.execute("SELECT 1 FROM matches WHERE game_version LIKE ? LIMIT 1",
+                       (f"{CALENDAR_PREFIX}{patch}.%",)).fetchone()
+    return "calendar" if hit else "build"
+
+
+def _explain_missing_patch(conn: sqlite3.Connection, tft_set: int | None) -> None:
+    """Log why no patch could be read, with what the parser was given.
+
+    With no patch the build still publishes, just unfiltered by patch -- and
+    nothing else says so. The first Set 18 crawl did exactly that across 3,340
+    matches. Only info-level version fields are logged, never participants.
+    """
+    clause, params = _set_clause(tft_set)
+    n = conn.execute("SELECT COUNT(*) FROM matches WHERE 1=1" + clause, params).fetchone()[0]
+    if not n:
+        return
+    versions = [v for (v,) in conn.execute(
+        "SELECT DISTINCT game_version FROM matches WHERE 1=1" + clause + " LIMIT 5", params)]
+    row = conn.execute("SELECT raw FROM matches WHERE 1=1" + clause + " LIMIT 1",
+                       params).fetchone()
+    info = json.loads(row[0]).get("info", {}) if row else {}
+    version_like = {k: v for k, v in info.items()
+                    if any(w in k.lower() for w in ("version", "patch", "build"))}
+    log.warning("no patch readable from %d stored matches; publishing them unfiltered by "
+                "patch. game_version values: %r; version-like info fields: %r; info keys: %s",
+                n, versions, version_like, sorted(info))
+
+
 def publish(db_path: str = "tft.db", tft_set: int | None = None,
             comp_names: dict | None = None, keep_builds: int = 5,
             patch: str | None = None, asset_version: str | None = None) -> Path:
     conn = sqlite3.connect(db_path)
     if tft_set is None:
         tft_set = current_set(conn)
-        log.info("building for set %s (auto-detected from the store)", tft_set)
     if tft_set is None:
         raise RuntimeError("no ranked set in the match store")
+    assign_calendar_patches(conn)
     forced = patch is not None
     patch = patch or current_patch(conn, tft_set=tft_set)
     if patch:
@@ -406,12 +547,15 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
         # the kind of thing you only notice after acting on it, so the newer
         # patch and how close it is to taking over are logged every run.
         counts = patch_counts(conn, tft_set)
-        n_patch = counts.get(tuple(map(int, patch.split("."))), 0)
-        n_all = conn.execute("SELECT COUNT(*) FROM matches WHERE queue_id=1100 AND tft_set=?",
-                             (tft_set,)).fetchone()[0]
-        log.info("building for patch %s%s: %d of %d stored matches (%.0f%%)",
-                 patch, " (forced)" if forced else "",
-                 n_patch, n_all, 100 * n_patch / max(n_all, 1))
+        clause, params = _set_clause(tft_set)
+        n_patch = conn.execute("SELECT COUNT(*) FROM matches WHERE game_version LIKE ?" + clause,
+                               (patch_filter(patch), *params)).fetchone()[0]
+        n_all = conn.execute("SELECT COUNT(*) FROM matches WHERE 1=1" + clause,
+                             params).fetchone()[0]
+        log.info("building for patch %s%s: %d of %d stored %smatches (%.0f%%)",
+                 patch, " (forced)" if forced else "", n_patch, n_all,
+                 f"Set {tft_set} " if tft_set is not None else "",
+                 100 * n_patch / max(n_all, 1))
 
         newest = max(counts, default=None)
         if newest and f"{newest[0]}.{newest[1]}" != patch:
@@ -421,26 +565,38 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
                 "%d more matches to switch.",
                 newest[0], newest[1], have, MIN_PATCH_MATCHES, patch,
                 MIN_PATCH_MATCHES - have)
+    else:
+        _explain_missing_patch(conn, tft_set)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     out = BUILD_DIR / stamp
     out.mkdir(parents=True, exist_ok=True)
 
     try:
         from static_data import load_all, NameResolver
-        resolver = NameResolver(load_all(asset_version), tft_set)
+        resolver = NameResolver(load_all(asset_version))
     except Exception as e:  # noqa: BLE001
         log.warning("Data Dragon unavailable (%s); falling back to ID prettifier", e)
         resolver = None
 
     try:
-        planner_codes = team_planner_codes(tft_set, resolver.version) if resolver else {}
+        planner_codes = team_planner_codes(tft_set)
     except Exception:
         log.exception("team planner codes unavailable; comps ship without share codes")
         planner_codes = {}
 
     manifest = {"generated_at": int(time.time()), "patch": patch,
                 "patch_label": PATCH_NAMES.get(patch, patch) if patch else None,
+                "patch_source": patch_source(conn, patch),
                 "tft_set": tft_set, "slices": []}
+
+    champion_meta = {}
+    if resolver:
+        try:
+            from static_data import build_champion_meta
+            champion_meta = build_champion_meta(resolver, tft_set)
+        except Exception:
+            log.exception("champion catalogue unavailable for this build")
+    playable_ids = set(champion_meta)
 
     for sd in SLICES:
         scope = slice_scope(conn, sd, patch, tft_set)
@@ -471,7 +627,7 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
         detail_filters = {k: v for k, v in filters.items()}
         published = {sig: {"name": (comp_names or {}).get(sig, sig)} for sig in stats["comps"]}
         try:
-            details = build_comp_details(conn, published, resolver, **detail_filters)
+            details = build_comp_details(conn, published, resolver, playable_ids=playable_ids, **detail_filters)
         except Exception:
             log.exception("comp detail failed for %s; publishing without it", sd["id"])
             details = {}
@@ -583,8 +739,6 @@ def publish(db_path: str = "tft.db", tft_set: int | None = None,
         # driven purely by stats would show a fraction of the real roster and
         # augment pool. The client joins measured stats onto these.
         try:
-            from static_data import build_champion_meta
-            champion_meta = build_champion_meta(resolver, tft_set)
             meta = _write(out / "champion-meta.json", champion_meta)
             log.info("published champion-meta: %d champions, %.1f KB gzipped",
                      len(champion_meta), meta["gzip_bytes"] / 1024)

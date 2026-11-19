@@ -5,11 +5,13 @@ Endpoints used (all documented at https://developer.riotgames.com/apis):
   tft-league-v1   -> platform routing (na1, euw1, kr, sg2, ...)
   tft-match-v1    -> regional routing (americas, europe, asia)
 
-Personal (development) keys are limited to roughly:
+Development and personal keys are limited to:
   20 requests / 1 second
   100 requests / 2 minutes
+HexCall runs on a registered personal key (developer portal app 870684), which
+has exactly these limits but, unlike a development key, does not expire.
 Production keys are far higher. This client enforces the personal-key limits by
-default; raise them via RateLimiter if you get approved for a production key.
+default; raise them via RateLimiter if the product is moved to a production key.
 
 The API key is read from the RIOT_API_KEY environment variable. Never hardcode
 it -- Riot's security policy explicitly forbids shipping keys in distributed code.
@@ -129,7 +131,9 @@ class RiotTFTClient:
             if r.status_code in (401, 403):
                 raise RuntimeError(
                     f"{r.status_code} from Riot -- key is invalid or expired. "
-                    "Personal keys expire every 24 hours; regenerate it."
+                    "Development keys expire every 24 hours; a registered "
+                    "product key does not, so if RIOT_API_KEY holds one, check "
+                    "it has not been regenerated on developer.riotgames.com."
                 )
             r.raise_for_status()
         raise RuntimeError(f"gave up on {url} after {self.max_retries} attempts")

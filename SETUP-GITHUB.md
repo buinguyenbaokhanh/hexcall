@@ -61,23 +61,21 @@ how much they differentiate you:
   withholds under-sampled slices, and surfaces confidence. Knowing when not to show a
   number is a senior instinct.
 
-## 5. Optional: enable the automated crawl
+## 5. Enable the automated crawl
 
-`.github/workflows/crawl.yml` crawls every 6 hours and deploys to Pages.
+`.github/workflows/crawl.yml` crawls once a day, commits the refreshed `data/`, and
+dispatches `deploy.yml` to redeploy Pages. The schedule is on.
 
-1. Settings → Secrets and variables → Actions → New secret: `RIOT_API_KEY`
+1. Settings → Secrets and variables → Actions → New secret: `RIOT_API_KEY`, set to
+   the registered product key from the app's page in the developer portal
 2. Settings → Pages → Source: **GitHub Actions**
+3. Actions → crawl-and-publish → **Run workflow** to publish without waiting a day
 
-⚠️ **This needs a production key.** Development keys expire every 24 hours, so the
-scheduled run will fail on day two. Until you're approved, either leave the workflow
-disabled or run it manually via `workflow_dispatch` after refreshing your key.
+It needs the registered key, which doesn't expire. A development key would fail
+the schedule from day two, and a workflow with a long red failure history looks
+worse on a portfolio repo than no workflow at all. If the secret is missing or
+the key stops working, the run fails loudly rather than going green with nothing
+crawled.
 
-A workflow with a long red failure history looks worse on a portfolio repo than no
-workflow at all — so disable the schedule until your key can support it:
-
-```yaml
-on:
-  workflow_dispatch:    # manual only
-  # schedule:
-  #   - cron: "0 */6 * * *"
-```
+When a new TFT set launches, change `TFT_SET` at the top of `crawl.yml`. The match
+store's cache key follows it, so the new set starts from a clean store.

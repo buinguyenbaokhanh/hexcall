@@ -20,7 +20,7 @@ if [ -z "${RIOT_API_KEY:-}" ]; then
 fi
 
 PLATFORM="${1:-na1}"
-if [ -n "${2:-}" ]; then set -- --set "$2"; else set --; fi
+SET_NUM="${2:-18}"
 
 cd pipeline
 ../.venv/bin/python scheduler.py --once \
@@ -29,7 +29,7 @@ cd pipeline
   --players-per-tier 60 \
   --matches-per-player 20 \
   --lookback-days 3 \
-  "$@"
+  --set "$SET_NUM"
 
 echo
 echo "Published slices:"

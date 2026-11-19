@@ -108,7 +108,7 @@ list. In testing, EUW and KR were correctly withheld at ~3,850.
 
 **Patch history powers Trends.** The scheduler retains older matches. Published
 rankings use the selected set and client build. When Riot supplies no build
-number, the snapshot shows the set and match date.
+number for a Set 18 match, the publisher assigns the patch from its match date and the release calendar.
 
 **Publishing is atomic.** Each build writes to `builds/<timestamp>/`, then flips
 a `current` symlink. A client mid-fetch never sees a half-written file, and
@@ -121,13 +121,15 @@ others continue and the previous build stays live. Stale data beats no data.
 
 | Key type | Realistic scope |
 |---|---|
-| Personal (20/s, 100/2min, expires daily) | one region, shallow crawl, dev only |
-| Production | multi-region, 6h cadence, what you actually ship on |
+| Development (20/s, 100/2min, expires daily) | one region, shallow crawl, dev only |
+| Personal, registered (20/s, 100/2min, no expiry) | daily crawl of three regions' apex ladders — what HexCall runs on |
+| Production | multi-region, 6h cadence, deeper ladders |
 
-Getting a production key requires Riot to review a working prototype — the UI
-you already have is what you show them. Note their approved use case list
-includes *"aggregate player stats (no specific players)"* without RSO, which is
-exactly what this pipeline does.
+HexCall is registered and approved on the developer portal as a personal
+product (app 870684). A production key would only be needed for more depth or
+frequency than the daily crawl; it requires Riot to review the live product.
+Note their approved use case list includes *"aggregate player stats (no specific
+players)"* without RSO, which is exactly what this pipeline does.
 
 ## Still to build
 

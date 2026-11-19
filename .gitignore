@@ -1,6 +1,7 @@
 # secrets — never commit these
 .env
 .env.*
+!.env.example
 *.key
 riot_key*
 

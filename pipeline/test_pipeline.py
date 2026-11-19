@@ -17,6 +17,7 @@ import time
 
 from ingest import open_db
 from aggregate import build_stats, comp_signature, is_legend_augment
+from publish import current_patch
 
 random.seed(42)
 
@@ -151,6 +152,67 @@ def main() -> None:
     print(f"  Recovered planted comp ordering: {'PASS' if ok else 'FAIL'}")
     print(f"    expected {expected_order}")
     print(f"    observed {observed_order}")
+
+    check_set_rollover()
+
+
+def check_set_rollover() -> None:
+    """A new set's first patch must win over the old set's last one.
+
+    The old set's patch is newer-looking than nothing and far better sampled,
+    so a set-blind choice picks it -- and a build pinned to the new set then
+    filters to zero rows.
+    """
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE matches (match_id TEXT PRIMARY KEY, game_version TEXT, tft_set INTEGER)")
+    rows = [(f"old_{i}", "Linux Version 16.16.804.9184 (Aug 10 2026)", 17) for i in range(1500)]
+    rows += [(f"new_{i}", "Linux Version 16.19.812.1234 (Sep 21 2026)", 18) for i in range(300)]
+    conn.executemany("INSERT INTO matches VALUES (?,?,?)", rows)
+
+    got_new, got_old = current_patch(conn, tft_set=18), current_patch(conn, tft_set=17)
+    ok = got_new == "16.19" and got_old == "16.16"
+    print(f"  Patch chosen within the build's set at a set rollover: {'PASS' if ok else 'FAIL'}"
+          f" -> Set 18 {got_new}, Set 17 {got_old}")
+
+    check_calendar_patches()
+
+
+def check_calendar_patches() -> None:
+    """Set 18 matches carry no version; their patch comes from when they were
+    played, and a patch's rollout window is left unassigned."""
+    from calendar import timegm
+    from publish import calendar_patch, assign_calendar_patches
+
+    table = {"18.2": "2026-09-10", "18.3": "2026-09-23"}
+    at = lambda s: timegm(time.strptime(s, "%Y-%m-%d %H:%M")) * 1000  # noqa: E731
+    cases = {
+        "2026-09-09 11:59": None,      # before 18.2's rollout: before the calendar
+        "2026-09-10 09:00": None,      # 18.2 rolling out
+        "2026-09-15 12:00": "18.2",
+        "2026-09-22 11:59": "18.2",    # last minute before 18.3 starts rolling out
+        "2026-09-22 12:00": None,      # 18.3 rolling out (Asia, the previous UTC evening)
+        "2026-09-23 23:59": None,
+        "2026-09-24 00:00": "18.3",
+        "2026-10-08 23:59": "18.3",    # 15.x days after the last entry
+        "2026-10-09 00:00": None,      # 16 days on: the calendar has fallen behind
+    }
+    got = {when: calendar_patch(at(when), table) for when in cases}
+    ok = got == cases
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE matches (match_id TEXT PRIMARY KEY, game_datetime INTEGER,"
+                 " game_version TEXT, tft_set INTEGER)")
+    placeholder = "TFT Unreal Version ?.?.?.?"
+    conn.executemany("INSERT INTO matches VALUES (?,?,?,18)",
+                     [(f"m{i}", at("2026-09-26 10:00"), placeholder) for i in range(50)]
+                     + [("roll", at("2026-09-23 08:00"), placeholder)])
+    assign_calendar_patches(conn)
+    e2e = current_patch(conn, tft_set=18)
+    unassigned = conn.execute("SELECT game_version FROM matches WHERE match_id='roll'").fetchone()[0]
+    ok = ok and e2e == "18.3" and "?" not in unassigned and not any(c.isdigit() for c in unassigned)
+    print(f"  Unversioned Set 18 matches get a patch from the calendar: {'PASS' if ok else 'FAIL'}"
+          f" -> store resolves to {e2e}"
+          + ("" if got == cases else f"; mismatches {[(k, got[k], v) for k, v in cases.items() if got[k] != v]}"))
 
 
 if __name__ == "__main__":

@@ -105,7 +105,7 @@ The constraints are enforced in code, not just documented:
 | No Legend augment win rates | `LEGEND_AUGMENT_PREFIXES` filter in `aggregate.py` |
 | No real-time game-state recommendations | Augments are entered manually; the app never reads game state |
 | No opponent/lobby scouting during gameplay | Review covers your own history only |
-| Product registration required | — |
+| Product registration required | Registered and approved on the Riot Developer Portal (app 870684; `tft-league-v1`, `tft-match-v1`) |
 
 The line Riot draws: static pre-game guidance is explicitly allowed, but recommendations
 that *"adjust in real time based on the player's actions in game and give direct
@@ -126,7 +126,7 @@ feature here.
 **Deploy:** GitHub Actions → Pages, or any static host
 
 No ORM, no message queue, no Redis. The data is small, the write pattern is
-"one process, once every six hours," and SQLite handles it without ceremony.
+"one process, once a day," and SQLite handles it without ceremony.
 
 ---
 
@@ -142,11 +142,14 @@ For real data, get a key at [developer.riotgames.com](https://developer.riotgame
 
 ```bash
 export RIOT_API_KEY=RGAPI-...
-./run-crawl.sh na1 17     # platform, TFT set
+./run-crawl.sh na1 18     # platform, TFT set (18 = Enchanted Wilds)
 ./run-dev.sh
 ```
 
-Development keys expire every 24 hours. See [START-HERE.md](START-HERE.md) for the full
+Development keys expire every 24 hours. The live site doesn't depend on one: HexCall's
+registered key sits in the repo's `RIOT_API_KEY` Actions secret, and
+[`crawl.yml`](.github/workflows/crawl.yml) crawls NA, EUW and SEA daily, commits the
+refreshed `data/` and redeploys. See [START-HERE.md](START-HERE.md) for the full
 walkthrough and [pipeline/DEPLOYMENT.md](pipeline/DEPLOYMENT.md) for production notes.
 
 ---
@@ -170,6 +173,11 @@ into Fast 9) and the review engine is asserted to find all four.
 
 ## Known limitations
 
+- **Set 18 patches come from a calendar.** Since TFT moved to Unreal, every match
+  reports its version as `TFT Unreal Version ?.?.?.?`, so a match's patch is assigned
+  from when it was played using `PATCH_CALENDAR` in `providers.py`. Add each new
+  patch's date there; games in a patch's rollout window, or more than 16 days past
+  the newest entry, are left out rather than guessed.
 - **Comp naming is hand-maintained.** `COMP_NAMES` in `providers.py` maps trait
   signatures to community names. These shift every patch and auto-generated labels read
   awkwardly.

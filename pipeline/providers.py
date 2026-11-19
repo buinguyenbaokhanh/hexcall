@@ -138,6 +138,29 @@ PATCH_NAMES: dict[str, str] = {
 }
 
 
+# TFT patch release dates (the listed live date, UTC), for matches that carry
+# no version at all.
+#
+# Set 18 moved TFT to Unreal, and its matches report game_version as the
+# literal "TFT Unreal Version ?.?.?.?" -- every one of the 3,463 in the first
+# Set 18 store, and no other info field names a patch either. So a Set 18
+# match's patch can only come from when it was played. publish.py assigns it
+# from this table, leaving each patch's rollout window unassigned rather than
+# guessing, since a patch deploys region by region over about a day.
+#
+# Hand-edited like PATCH_NAMES: add each patch as Riot confirms its date (the
+# published schedule, or the patch notes). A match more than
+# CALENDAR_MAX_PATCH_DAYS past the last entry is left unassigned and logged,
+# so a table that falls behind stops publishing new data rather than blending
+# two patches under one label.
+PATCH_CALENDAR: dict[str, str] = {
+    "18.1": "2026-08-26",
+    "18.2": "2026-09-10",
+    "18.3": "2026-09-23",
+    "18.4": "2026-10-07",   # scheduled; correct it if Riot moves the patch
+}
+
+
 def _auto_comp_name(traits_part: str, carry: str, resolver) -> str:
     head = traits_part.split("_")[0]
     head = "".join(ch for ch in head if not ch.isdigit())

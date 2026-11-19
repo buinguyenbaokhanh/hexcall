@@ -254,7 +254,7 @@ def _detail_from(boards: list[dict], playable_ids: set[str] | None = None) -> di
     }
 
 
-def build_comp_details(conn, published_comps: dict, resolver=None, **filters) -> dict:
+def build_comp_details(conn, published_comps: dict, resolver=None, playable_ids=None, **filters) -> dict:
     """Returns {slug: detail_document}. One document per published comp."""
     from aggregate import iter_participants
 
@@ -307,8 +307,6 @@ def build_comp_details(conn, published_comps: dict, resolver=None, **filters) ->
         return d
 
     out = {}
-    playable_ids = {c["apiName"] for c in resolver.roster.get("champions", [])
-                    if c.get("apiName") and c.get("traits")} if resolver else None
     for sig, boards in by_comp.items():
         base = decorate(_detail_from(boards, playable_ids or None))
         if not base:

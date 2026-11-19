@@ -53,11 +53,16 @@ Fast 9 comps jump the list. That reordering is the whole point of the tool.
 2. Copy your **Development API Key** from the dashboard
 
 ⚠️ **Development keys expire every 24 hours.** You'll regenerate it daily until
-you get a production key. This is the single most annoying part of the process
+the product is registered. This is the single most annoying part of the process
 and it catches everyone.
 
+HexCall is now registered and approved (app 870684), so the product key on the
+app's page in the developer portal does not expire. It has the same rate limits
+as a development key (20 requests/second, 100 per 2 minutes).
+
 ```bash
-export RIOT_API_KEY=RGAPI-your-key-here
+cp .env.example .env      # then put the key in .env -- it is gitignored
+# or: export RIOT_API_KEY=RGAPI-your-key-here
 ```
 
 Put it in your shell profile so you're not re-typing it, but **never commit it**.
@@ -65,7 +70,7 @@ Put it in your shell profile so you're not re-typing it, but **never commit it**
 ## Step 4 — Crawl real data
 
 ```bash
-./run-crawl.sh na1 17        # platform, TFT set number
+./run-crawl.sh na1 18        # platform, TFT set number (18 = Enchanted Wilds)
 ```
 
 Regions: `na1 euw1 eun1 kr jp1 br1 oc1 sg2 tw2 vn2 th2 ph2 la1 la2 tr1 ru`
@@ -117,15 +122,17 @@ Then either:
 Set `VITE_API_BASE` to wherever your stats live.
 
 **GitHub Pages, fully automated:** the included
-`.github/workflows/crawl.yml` crawls every 6 hours, builds the app, and deploys
-both to Pages. Setup:
+`.github/workflows/crawl.yml` crawls NA, EUW and SEA once a day, commits the
+refreshed `data/`, and triggers `deploy.yml` to rebuild the site. Setup:
 
 1. Push the repo to GitHub
 2. Settings → Secrets and variables → Actions → add `RIOT_API_KEY`
 3. Settings → Pages → Source: "GitHub Actions"
 
-⚠️ This needs a **production key**. Development keys expire daily, so the
-scheduled job will fail on day two. Run crawls by hand until you're approved.
+This needs a key that doesn't expire — the registered product key, not a
+development key, which would fail the schedule from day two. To run it straight
+away rather than wait for the schedule: Actions → crawl-and-publish → Run
+workflow.
 
 ### Option B — Overlay on top of the game (Overwolf)
 
@@ -152,17 +159,22 @@ mode. Overwolf is the better tool for the actual job.
 
 ---
 
-## Getting a production key
+## Product registration
 
-You'll want one for: no daily expiry, higher rate limits, multi-region crawling,
-and automation.
+Done: HexCall is registered on developer.riotgames.com and approved (app 870684,
+Teamfight Tactics, `tft-league-v1` + `tft-match-v1`). Riot's approved use cases
+explicitly include *"aggregate player stats (no specific players)"* without RSO —
+which is exactly what this pipeline does.
 
-Apply at developer.riotgames.com → Register Product → Personal or Production.
-Riot wants to see the user flow, so link your deployed app from Option A. Their
-approved use cases explicitly include *"aggregate player stats (no specific
-players)"* without RSO — which is exactly what this pipeline does.
+The approved key is a personal one: no daily expiry, which is what unattended
+automation needed, but the same 20/s and 100/2min limits as a development key.
+The daily three-region crawl is sized to that. A production key (higher limits)
+would only be worth applying for if the crawl needs more depth or frequency —
+it's a separate application from the same app page.
 
-Approval takes days to weeks. Ship the web app first; that *is* your application.
+Keep the key out of the repo: it goes in `.env` locally and in the
+`RIOT_API_KEY` Actions secret for CI. If it ever leaks, regenerate it from the
+app page and update the secret.
 
 ---
 
@@ -196,7 +208,10 @@ it isn't where the skill is.
 
 ## Troubleshooting
 
-**`401`/`403` from Riot** — key expired. Regenerate it; they last 24 hours.
+**`401`/`403` from Riot** — key invalid or expired. A development key lasts 24
+hours; the registered product key doesn't expire, so a 401/403 on it means it was
+regenerated — copy the current one from the app page into `.env` and the
+`RIOT_API_KEY` secret.
 
 **`429` everywhere** — you're sharing the key with another process. Only one
 crawler at a time; `scheduler.py` has a lock file to enforce this.
