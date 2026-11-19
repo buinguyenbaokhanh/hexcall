@@ -28,6 +28,7 @@ import json
 import logging
 import os
 from contextvars import ContextVar
+from functools import lru_cache
 from pathlib import Path
 
 log = logging.getLogger("chat")
@@ -46,7 +47,6 @@ HISTORY_TURNS = 8
 
 # --- data access ----------------------------------------------------------
 
-_cache: dict[str, dict] = {}
 
 # What each answer actually looked up, recorded by the tools themselves.
 #
@@ -69,14 +69,16 @@ def _note(kind: str, name: str, tab: str) -> None:
         refs.append({"kind": kind, "name": name, "tab": tab})
 
 
+@lru_cache(maxsize=16)
+def _read_build_slice(path: Path) -> dict:
+    return json.loads(path.read_text())
+
+
 def _slice(slice_id: str = "global-all") -> dict:
-    """One published slice, memoised. Published files are immutable per build."""
-    if slice_id not in _cache:
-        path = CURRENT / f"{slice_id}.json"
-        if not path.exists():
-            raise FileNotFoundError(slice_id)
-        _cache[slice_id] = json.loads(path.read_text())
-    return _cache[slice_id]
+    """The resolved build changes when the publisher switches sets or patches."""
+    if not slice_id.replace("-", "").isalnum():
+        raise FileNotFoundError(slice_id)
+    return _read_build_slice(CURRENT.resolve() / f"{slice_id}.json")
 
 
 def _manifest() -> dict:
@@ -134,6 +136,7 @@ def list_slices() -> str:
     return json.dumps({
         "patch": m.get("patch_label") or m.get("patch"),
         "client_build": m.get("patch"),
+        "set": m.get("tft_set"),
         "slices": [{"id": s["id"], "label": s["label"], "boards": s["sample_size"],
                     "comps": s["comps"]} for s in m["slices"]],
         "note": ("Slices are withheld when they cannot support a ranking, so a "
